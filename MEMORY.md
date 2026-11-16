@@ -35,5 +35,5 @@
 - [x] End-to-end audit of yulko.ru (ООО «ЮЛКО», Тверь, ИНН 6950149592, Уткин Ю.Ю., kit & report re-targeted, clean lead draft).
 - [x] Dual-Track Multimodal Engine v2.0 (`vlm_context_engine`, Track A/B, ZDR, SSRF/PII blur, 152/152 tests).
 - [x] Production Hardening & Operational Resilience (registry_cache 30d/7d, net_safety Anti-SSRF, batch_checkpoints, outreach_ledger 90d, AdRadar_Menu.bat, 160/160 tests, cert hash 46fb1df6218c6dd3).
-- [x] GitHub Publishing & Documentation: pushed to https://github.com/kiliankaena85-byte/AdRadarData, hardened .gitignore, full usage guide & constraints in README.md, gate certified (160/160 tests, hash 46fb1df6218c6dd3).
+- [x] GitHub Publishing & Documentation: remote configured to https://github.com/kiliankaena85-byte/AdRadarData, hardened .gitignore, requirements specs, kit manifest fixed in README.md, gate certified (160/160 tests, commit 8f72a59).
 - [ ] Next: VC.ru lead generation batch run via `AdRadar_Menu.bat`.
