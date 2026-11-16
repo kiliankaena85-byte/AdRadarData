@@ -1,0 +1,72 @@
+# =====================================================================
+# Реестр мораториев, переходных периодов и специальных льгот МСП РФ
+# =====================================================================
+
+sanctions_timeline:
+  ad_marking_parts_15_17:
+    statute: "КоАП РФ ч. 15-17 ст. 14.3"
+    effective_from: "2023-09-01"
+    description: "Введение административной ответственности за нарушение требований к маркировке интернет-рекламы и непредставление сведений в ЕРИР"
+    retroactive: false
+  personal_data_localization_152fz:
+    statute: "КоАП РФ ч. 8, 9 ст. 13.11"
+    effective_from: "2019-12-02"
+    description: "Административная ответственность за нарушение требований о локализации баз данных ПДн граждан РФ (1-6 млн руб.)"
+    retroactive: false
+  russian_language_168fz:
+    statute: "168-ФЗ / 38-ФЗ ч. 5 ст. 5"
+    effective_from: "2023-02-28"
+    full_enforcement_from: "2025-01-01"
+    description: "Ограничение использования англицизмов и иностранных слов без перевода в коммерческих предложениях"
+    retroactive: false
+
+retroactive_leniency_acts:
+  decree_1427_ord_retention:
+    act_number: "Постановление Правительства РФ от 18.09.2025 № 1427"
+    effective_from: "2025-09-18"
+    is_retroactive_leniency: true
+    statutory_basis: "ч. 2 ст. 1.7 КоАП РФ (обратная сила акта, отменяющего или смягчающего ответственность)"
+    retention_months_limit: 12
+    exempt_media_types:
+      - "text"
+      - "image"
+      - "banner"
+      - "native_post"
+      - "article"
+    non_exempt_media_types:
+      - "video"
+      - "stream"
+    rule: "Для не-видео креативов срок обязательной отчетности и хранения данных в ОРД/ЕРИР ограничен 1 годом с момента исполнения договора."
+
+sme_statutory_relief:
+  koap_art_4_1_1:
+    rule_name: "Замена административного штрафа на предупреждение"
+    legal_basis: "ст. 4.1.1 КоАП РФ"
+    mandatory: true
+    conditions:
+      first_time_infraction: true
+      registry_status: "SME"
+      no_harm_to_life_health: true
+      no_property_damage: true
+      no_emergency_situation: true
+    effect: "Обязательная замена штрафа (200 000 - 500 000 руб.) на административное предупреждение без финансовых взысканий."
+
+  koap_art_4_1_2:
+    rule_name: "Снижение штрафа для малых и микропредприятий до уровня ИП"
+    legal_basis: "ст. 4.1.2 КоАП РФ"
+    eligible_categories:
+      - "MICRO"
+      - "SMALL"
+    effect: "Размер административного штрафа для субъектов малого бизнеса исчисляется в пределах санкции для ИП (от 30 000 до 100 000 руб. вместо 200 000 - 500 000 руб.)."
+
+moratoriums:
+  decree_448_it_moratorium:
+    act: "Постановление Правительства РФ от 24.03.2022 № 448"
+    start_date: "2022-03-24"
+    end_date: "2024-12-31"
+    scope: "Аккредитованные российские IT-организации"
+  decree_336_general_moratorium:
+    act: "Постановление Правительства РФ от 10.03.2022 № 336"
+    start_date: "2022-03-10"
+    end_date: "2030-12-31"
+    scope: "Ограничение контрольных (надзорных) мероприятий в отношении субъектов МСП"

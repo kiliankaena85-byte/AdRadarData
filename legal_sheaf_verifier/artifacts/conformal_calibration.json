@@ -1,0 +1,8 @@
+{
+  "target_precision": 0.96,
+  "decision_threshold": 0.5,
+  "abstain_lower": 0.35,
+  "abstain_upper": 0.62,
+  "temperature_val": 0.15000333752851894,
+  "ece_score": 4.497608500908524e-12
+}

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  adradar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: adradar_compliance_engine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ADRADAR_DATA_DIR=/data
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - adradar_data:/data
+      - ./kb_inbox:/app/kb_inbox
+    healthcheck:
+      test: ["CMD", "adradar", "doctor"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  adradar_data:
+    driver: local

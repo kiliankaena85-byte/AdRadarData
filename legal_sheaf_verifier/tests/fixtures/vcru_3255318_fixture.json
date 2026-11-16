@@ -1,0 +1,86 @@
+{
+  "audit_type": "ARTICLE_AUDIT",
+  "context_mode": "EXTERNAL_PUBLICATION",
+  "article_url": "https://vc.ru/tech/3255318-shurupovert-makita-kak-vybrat-i-kakie-modeli-sushchestvuyut",
+  "title": "Шуруповёрт Макита (Makita): какую модель выбрать и чем её заменить",
+  "author": "CaseGuru",
+  "is_promo_platform_flag": false,
+  "has_erid": false,
+  "erid_token": null,
+  "scenario_38fz": "UNMARKED_AD_NO_ERID",
+  "is_violation_38fz": true,
+  "verdict_38fz": "Скрытая интернет-реклама / партнерская реф-ссылка без маркировки токеном erid (ч. 16 ст. 14.3 КоАП РФ)",
+  "commercial_links": [
+    "https://caseguru.ru/blog/gadzhety/top-10-udarnyh-shurupovertov-2026/?utm_source=vc.ru&utm_medium=article&utm_campaign=SHUR&utm_content=vc-005",
+    "https://caseguru.ru/product/caseguru_shurik/?utm_source=vc.ru&utm_medium=article&utm_campaign=SHUR&utm_content=vc-005",
+    "https://caseguru.ru/blog/gadzhety/top-10-besshchetochnyh-shurupovertov-2026/?utm_source=vc.ru&utm_medium=article&utm_campaign=SHUR&utm_content=vc-005",
+    "https://caseguru.ru/blog/gadzhety/top-10-luchshih-shurupovertov-dlya-doma-dachi-2025/?utm_source=vc.ru&utm_medium=article&utm_campaign=SHUR&utm_content=vc-005"
+  ],
+  "traffic_light": {
+    "RED_REAL_FINE": [
+      {
+        "signature": "unmarked_ad_no_erid",
+        "tier": "RED_REAL_FINE",
+        "is_real_fine": true,
+        "is_regulatory_demand": false,
+        "is_hygiene_bonus": false,
+        "koap_article": "14.3_part_16",
+        "legal_basis": "ч. 16 ст. 14.3 КоАП РФ, ст. 18.1 38-ФЗ",
+        "description": "Распространение интернет-рекламы / партнерских ссылок без токена erid во внешней публикации",
+        "witness": {
+          "source_url": "https://vc.ru/tech/3255318-shurupovert-makita-kak-vybrat-i-kakie-modeli-sushchestvuyut",
+          "line_number": 1,
+          "raw_snippet": "URL: https://vc.ru/tech/3255318-shurupovert-makita-kak-vybrat-i-kakie-modeli-sushchestvuyut | Link: промокод SHUR11",
+          "quote": "промокод SHUR11",
+          "quote_start": 5379,
+          "quote_end": 5394,
+          "rkn_registry_response": null,
+          "notes": "Скрытая интернет-реклама / партнерская реф-ссылка без маркировки токеном erid (ч. 16 ст. 14.3 КоАП РФ)"
+        }
+      }
+    ],
+    "ORANGE_REGULATORY_DEMAND": [],
+    "GRAY_HYGIENE_BONUS": []
+  },
+  "penalties": {
+    "raw_violations_count": 1,
+    "unique_articles_count": 1,
+    "rkn_risk_indicators_count": 1,
+    "regulatory_outcome": "PRECAUTION_OR_DEMAND_10_DAYS",
+    "outcome_description": "По ст. 49 248-ФЗ число расхождений (1) ниже порога риска (3). Автоматический штраф не назначается; оператору направляется предостережение или требование об устранении за 10 дней.",
+    "is_sme": true,
+    "is_ip": true,
+    "first_offense": true,
+    "warning_substituted": true,
+    "sme_warning_note": "(1-й контакт МСП: предупреждение по ст. 4.1.1 КоАП; штраф при жалобе / неисполнении предписания)",
+    "grouped_penalties": [
+      {
+        "article": "14.3_part_16",
+        "description": "Распространение интернет-рекламы без идентификатора рекламы (erid) либо непредставление в ЕРИР",
+        "matched_count": 1,
+        "matched_violations": [
+          "unmarked_ad_no_erid"
+        ],
+        "status": "SME_WARNING_SUBSTITUTED",
+        "min_rubles": 0,
+        "max_rubles": 0,
+        "applicable_min_rubles": 30000,
+        "applicable_max_rubles": 100000,
+        "nominal_min_rubles": 200000,
+        "nominal_max_rubles": 500000,
+        "note": "Применена ст. 4.1.1 КоАП РФ: замена первого штрафа предупреждением для ИП. Вилка при неисполнении: 30,000 – 100,000 руб."
+      }
+    ],
+    "total_min_rubles": 0,
+    "total_max_rubles": 0,
+    "applicable_min_rubles": 30000,
+    "applicable_max_rubles": 100000,
+    "applied_legal_principles": [
+      "ч. 5 ст. 4.4 КоАП РФ: Однородные нарушения сгруппированы в один состав (запрет мультипликации штрафов)",
+      "248-ФЗ: Процессуальный фильтр (предостережение и 10 дней на устранение)"
+    ]
+  },
+  "sheaf_energy": 0.3827,
+  "conformal_verdict": "VIOLATION",
+  "violation_probability": 0.7311
+}
