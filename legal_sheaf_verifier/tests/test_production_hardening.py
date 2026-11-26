@@ -6,7 +6,10 @@ Unit tests for AdRadar Production Hardening components:
 4. outreach_ledger.py: 90-day cooldown enforcement, OPT_OUT permanent block, touch history.
 """
 
+import argparse
 import asyncio
+import json
+import sys
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -39,7 +42,7 @@ def test_registry_cache_fns_and_rkn(tmp_path):
     cache = RegistryCacheStore(db_path=db_path)
 
     # 1. FNS Cache (30 days TTL)
-    assert cache.get_fns("7704876543") is None
+    assert cache.get_fns("7704386120") is None
 
     # Valid FNS payload (200 OK)
     fns_payload = {
@@ -48,10 +51,10 @@ def test_registry_cache_fns_and_rkn(tmp_path):
         "revenue_year": 2024,
         "legal_name": "ООО ТЕСТ-ФНС",
     }
-    saved = cache.set_fns("7704876543", fns_payload)
+    saved = cache.set_fns("7704386120", fns_payload)
     assert saved is True
 
-    cached_fns = cache.get_fns("7704876543")
+    cached_fns = cache.get_fns("7704386120")
     assert cached_fns is not None
     assert cached_fns["revenue_rub"] == 120_000_000
     assert cached_fns["from_cache"] is True
@@ -233,3 +236,215 @@ def test_outreach_ledger_cooldown_and_opt_out(tmp_path):
     listed = ledger.list_ledger()
     assert len(listed) == 1
     assert listed[0]["root_domain"] == "furniture-tver.ru"
+
+
+# =============================================================================
+# 5. SPRINT 2 E2E PIPELINE: HUNT-VCRU -> PACKAGER/LEDGER -> VISUAL QC -> LEARN
+# =============================================================================
+def test_sprint2_unified_vcru_hunt_to_review_desk_and_learn(tmp_path, monkeypatch, champion_bundle):
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    from legal_sheaf.cli import cmd_learn
+    from legal_sheaf.dual_auditor import DualAuditor
+    from scripts.run_visual_qc import run_batch_from_hunt
+
+    # 1. Stub external DNS / RKN / supply-chain calls so test runs 100% offline
+    monkeypatch.setattr(
+        "legal_sheaf.net_safety.resolve_and_verify_host",
+        lambda host: (True, ["93.184.216.34"], ""),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.check_rkn_registry_async",
+        AsyncMock(return_value={"status": "NOT_FOUND", "is_registered_in_rkn": False, "operator_name": None}),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.discover_perimeter_hosts",
+        AsyncMock(return_value=["shop-partner.ru"]),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.inspect_infrastructure_geo_and_mx",
+        AsyncMock(return_value={"findings": [], "mx_records": []}),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.inspect_external_js_endpoints",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.resolve_phoenix_clones_in_fns",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.detect_regalia_and_pdf_chronology_mismatch",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.audit_vendor_supply_chain",
+        AsyncMock(return_value=([], [])),
+    )
+    monkeypatch.setattr(
+        "legal_sheaf.dual_auditor.enforce_fns_rate_limit_async",
+        AsyncMock(return_value=None),
+    )
+
+    # 2. HTTP MockTransport covering VC.ru API v2.1 / v2.8, target commercial .ru site, and bo.nalog.gov.ru
+    shop_html = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Шоп Партнер</title></head>
+<body>
+<h1>Магазин техники №1 в России — ООО «Шоп Партнер»</h1>
+<p>Цена от 4900 руб. Заказать онлайн. Контакты: info@shop-partner.ru, тел. +7 (495) 123-45-67</p>
+<p>Реквизиты: ООО «Шоп Партнер», ИНН 7704386120, ОГРН 1167746890123, Москва.</p>
+<form method="post" action="/lead">
+  <input type="text" name="phone" placeholder="Ваш телефон" required>
+  <input type="email" name="email" placeholder="Email">
+  <button type="submit">Оставить заявку</button>
+</form>
+</body></html>"""
+
+    vc_blocks = [
+        {
+            "type": "text",
+            "data": {
+                "text": (
+                    "Обзор сервиса Шоп Партнер: выгодная доставка, промокод SPRING2026! "
+                    '<a href="https://shop-partner.ru/?promo=spring">Перейти на сайт магазина</a>'
+                )
+            },
+        }
+    ]
+
+    def mock_handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        host = request.url.host or ""
+        if host == "api.vc.ru":
+            if "/v2.1/timeline" in url:
+                if "sorting=date" in url and "lastId=" not in url:
+                    return httpx.Response(
+                        200,
+                        json={
+                            "result": {
+                                "items": [
+                                    {
+                                        "data": {
+                                            "id": 991001,
+                                            "title": "Как выбрать надежный сервис доставки в 2026 году",
+                                            "author": {"name": "Автор Тест"},
+                                            "url": "https://vc.ru/services/991001-test-shop",
+                                            "blocks": vc_blocks,
+                                        }
+                                    }
+                                ],
+                                "lastId": 991001,
+                                "lastSortingValue": 1,
+                            }
+                        },
+                    )
+                return httpx.Response(200, json={"result": {"items": []}})
+            if "/v2.8/content" in url:
+                return httpx.Response(
+                    200,
+                    json={
+                        "result": {
+                            "id": 991001,
+                            "title": "Как выбрать надежный сервис доставки в 2026 году",
+                            "url": "https://vc.ru/services/991001-test-shop",
+                            "blocks": vc_blocks,
+                        }
+                    },
+                )
+        if host == "bo.nalog.gov.ru":
+            return httpx.Response(
+                200,
+                json={
+                    "content": [
+                        {
+                            "shortName": "ООО «ШОП ПАРТНЕР»",
+                            "okved2": "47.91",
+                            "bfo": {"period": 2024, "gainSum": 150000},
+                        }
+                    ]
+                },
+            )
+        if host == "shop-partner.ru":
+            if request.url.path in ("", "/"):
+                return httpx.Response(
+                    200,
+                    text=shop_html,
+                    headers={"Content-Type": "text/html; charset=utf-8"},
+                )
+            return httpx.Response(404, text="Not Found")
+        return httpx.Response(404, text="Not Found")
+
+    transport = httpx.MockTransport(mock_handler)
+    auditor = DualAuditor(bundle=champion_bundle)
+
+    async def _run_pipeline_async():
+        async with httpx.AsyncClient(transport=transport, follow_redirects=False) as client:
+            summary1 = await auditor.hunt_vcru(limit=1, client=client)
+            summary2 = await auditor.hunt_vcru(limit=1, output_dir=tmp_path / "run2", client=client)
+
+        async def _fake_capture(url: str, policy_text=None):
+            return {
+                "domain": "shop-partner_ru",
+                "final_url": url,
+                "detected_lang": "ru",
+                "zones": [],
+                "collage_path": "",
+                "policy_methods_snippet": None,
+            }
+
+        rc, batch_res = await run_batch_from_hunt(
+            hunt_report_path=summary1["report_path"],
+            max_leads=10,
+            skip_vlm=True,
+            fast_no_vega=True,
+            capture_fn=_fake_capture,
+        )
+        return summary1, summary2, rc, batch_res
+
+    summary1, summary2, rc, batch_res = asyncio.run(_run_pipeline_async())
+
+    # Verify Run 1: Packaged lead & NEW ledger status in isolated tmp_path
+    assert summary1["packaged_leads_count"] == 1
+    assert summary1["skipped_by_ledger"] == 0
+    data_dir = tmp_path / "adradar_data"
+    assert (data_dir / "reports" / "vcru_leads_v2" / "shop-partner_ru" / "index.html").exists()
+    assert (data_dir / "reports" / "vcru_leads_v2" / "shop-partner_ru" / "outreach_draft.txt").exists()
+
+    ledger_check = OutreachLedger(db_path=data_dir / "db" / "outreach_ledger.sqlite")
+    entry = ledger_check.get_entry("shop-partner.ru")
+    assert entry is not None
+    assert entry["status"] == "NEW"
+
+    # Verify Run 2: 90-day OutreachLedger cooldown skips already processed advertiser
+    assert summary2["skipped_by_ledger"] >= 1
+    assert summary2["packaged_leads_count"] == 0
+
+    # Verify Run 3: Batch Visual QC from consolidated hunt report
+    assert rc == 0
+    assert batch_res["processed"] == 1
+    assert (data_dir / "review_desk" / "index.html").exists()
+    assert (data_dir / "review_desk" / "shop-partner_ru" / "index.html").exists()
+
+    # Verify Run 4: cmd_learn --from-desk ingest with quick_tag FALSE_POSITIVE
+    fb_file = data_dir / "review_desk" / "feedback_shop-partner_ru.json"
+    fb_file.write_text(
+        json.dumps(
+            [
+                {
+                    "domain": "shop-partner.ru",
+                    "url": "https://shop-partner.ru",
+                    "finding_code": "form_missing_consent",
+                    "title": "Форма без согласия на ПДн",
+                    "quick_tag": "FALSE_POSITIVE",
+                    "approved_in_proposal": False,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    learn_rc = cmd_learn(argparse.Namespace(from_desk=str(fb_file), reviews=None, inbox=None))
+    assert learn_rc == 0
+    assert (data_dir / "models" / "vega_calibrated" / "calibration_dataset.jsonl").exists()
+    assert (data_dir / "models" / "human_hard_negatives.jsonl").exists()

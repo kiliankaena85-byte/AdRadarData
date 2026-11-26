@@ -65,6 +65,7 @@ class CompanyProfile(BaseModel):
     inn: Optional[str] = None
     ogrn: Optional[str] = None
     corporate_emails: List[str] = Field(default_factory=list)
+    telegram_contacts: List[str] = Field(default_factory=list)
     legal_name: Optional[str] = None
     management_name: Optional[str] = None
     management_post: Optional[str] = None

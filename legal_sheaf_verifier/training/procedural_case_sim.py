@@ -5,10 +5,34 @@ Russian advertising law practice archetypes (38-FZ, 168-FZ, KoAP Art. 4.1.1, 4.5
 
 from __future__ import annotations
 
-import random
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
 
 from legal_sheaf.schema import DocumentInput, LegalRegime, SlotID
+
+
+class _NumpyRng:
+    """Deterministic RNG adapter backed strictly by np.random.default_rng."""
+
+    def __init__(self, seed: int = 42):
+        self._rng = np.random.default_rng(seed)
+
+    def choice(self, seq: Sequence[Any]) -> Any:
+        idx = int(self._rng.integers(0, len(seq)))
+        return seq[idx]
+
+    def randint(self, a: int, b: int) -> int:
+        return int(self._rng.integers(a, b + 1))
+
+    def random(self) -> float:
+        return float(self._rng.random())
+
+    def shuffle(self, seq: List[Any]) -> None:
+        order = self._rng.permutation(len(seq))
+        snapshot = list(seq)
+        for dst, src in enumerate(order):
+            seq[dst] = snapshot[int(src)]
 
 
 class ProceduralCaseSimulator:
@@ -21,7 +45,7 @@ class ProceduralCaseSimulator:
     """
 
     def __init__(self, seed: int = 42):
-        self.rng = random.Random(seed)
+        self.rng = _NumpyRng(seed)
 
     def _sample_inn(self, valid: bool = True) -> str:
         if valid:
@@ -46,10 +70,11 @@ class ProceduralCaseSimulator:
         Generate a document and its ground-truth annotations.
         """
         if archetype_id is None:
-            archetype_id = self.rng.randint(0, 24)
+            archetype_id = self.rng.randint(0, 33)
 
         slots = [0] * 16
         meta = {}
+        context_mode = "AUTO"
 
         # Archetype 0: NATIVE_PROMO_NO_CTA
         # Subtle native promo, brand focus, positive eval, no direct word "купи", but with referral link.
@@ -510,7 +535,7 @@ class ProceduralCaseSimulator:
 
         # Archetype 24: UNIFORM_DEALER_PARTNER_LIST (Hard Negative 5)
         # Uniform dealer list ("Where to buy") across 5 partner companies without highlighting
-        else:
+        elif archetype_id == 24:
             text = (
                 "Где купить нашу продукцию? Единообразный перечень официальных авторизованных дилеров и региональных партнеров: "
                 "1. ООО «СеверАвто» — г. Санкт-Петербург, Московский пр-т, 12; "
@@ -529,7 +554,257 @@ class ProceduralCaseSimulator:
             slots[SlotID.ANALYTICAL_SHIELD] = 1
             slots[SlotID.MULTI_BRAND_REVIEW] = 1
             meta = {"context_mode": "OWN_WEBSITE"}
+            context_mode = "OWN_WEBSITE"
             days_ago = self.rng.randint(15, 100)
+
+        # Archetype 25: VC_CLEAN_LONG_MARKETING_PROSE (Real VC.ru 3500-5000 char marketing analytics)
+        elif archetype_id == 25:
+            topic = self.rng.choice(["сезонности спроса", "маркетинговой стратегии", "аналитики лидов", "воронки продаж"])
+            body = (
+                f"Разбор {topic} в B2B и EdTech на основе обезличенных кейсов за квартал. "
+                "Многие руководители спрашивают, какой рекламный бюджет закладывать на старт и как оценивать реклама или органика работает лучше. "
+                "Если рассматривать реклама курсов или классический перформанс, главная метрика остается прежней — стоимость привлечения клиента и окупаемость. "
+                "Рекомендуется сегментировать аудиторию, проверять гипотезы на малых выборках и не смешивать брендовый трафик с прямыми конверсиями. "
+                "Даже когда растет конкуренция, системная аналитика и работа с удержанием помогают удерживать маржинальность без агрессивных распродаж. "
+                "На практике отдел маркетинга ежемесячно пересматривает атрибуцию, тестирует гипотезы в контенте и фиксирует результаты в дашбордах. "
+            ) * 6
+            text = f"Почему контент-маркетинг и {topic} меняют экономику продукта. {body}"
+            html = f"<article><h1>Аналитика</h1><p>{text}</p></article>"
+            url = f"https://vc.ru/marketing/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 0
+            regime = LegalRegime.CLEAN_NON_AD
+            slots[SlotID.ANALYTICAL_SHIELD] = 1
+            days_ago = self.rng.randint(1, 45)
+
+        # Archetype 26: VC_CLEAN_CRYPTO_NEWS_ANALYTICS (3200-4500 chars news on BTC/ETH/OKX without promo/CTA)
+        elif archetype_id == 26:
+            coin = self.rng.choice(["биткоин", "Ethereum", "BTC"])
+            exch = self.rng.choice(["OKX", "Binance", "Bybit"])
+            text = (
+                f"Обзор рынка цифровых активов: курс {coin} на спотовых площадках, включая {exch}, "
+                "колебался в диапазоне 62 000 - 65 400 долларов США на фоне ставок финансирования и макроэкономической статистики. "
+                "Аналитики отмечают снижение волатильности деривативов и переток ликвидности между биржами. "
+                "Регуляторные инициативы в Азии и Европе продолжают влиять на институциональные фонды и объемы торгов. "
+                "Материал носит исключительно информационно-аналитический характер и не содержит инвестиционных рекомендаций. "
+            ) * 6
+            roll_26 = self.rng.random()
+            if roll_26 < 0.45:
+                text += " Источник статистики: https://www.rbc.ru/crypto/news"
+            elif roll_26 < 0.80:
+                text += " Короткие разборы рынка по ходу недели веду в канале: https://t.me/macro_market_notes"
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/crypto/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 0
+            regime = LegalRegime.CLEAN_NON_AD
+            slots[SlotID.ANALYTICAL_SHIELD] = 1
+            days_ago = self.rng.randint(1, 30)
+
+        # Archetype 27: VC_CLEAN_LONG_UGC_ESSAY_OR_COMPLAINT (3200-5500 chars essay/complaint, quoted lowercase phrases, 0 links)
+        elif archetype_id == 27:
+            is_complaint = self.rng.random() < 0.45
+            if is_complaint:
+                text = (
+                    "Мой аккаунт на площадке заблокировали по причине «нечестного поведения» после «массовой жалобы» конкурентов. "
+                    "Никаких нарушений правил я не допускал, поддержка отвечает шаблонами: «пусть система перепроверит», «обратитесь позднее». "
+                    "В похожей ситуации пользователи часто пишут: «погулять по сайту» без авторизации невозможно, а профиль не восстановить без ручного разбора. "
+                    "Готов предоставить документы и подтвердить добросовестность работы без сторонних публикаций и коммерческих предложений. "
+                ) * 9
+            else:
+                text = (
+                    "Четыре этапа взросления инженерной команды: наблюдения за десять лет. "
+                    "На первом этапе «работа» воспринимается как бесконечный спринт, где «пусть разгонится» процесс — главный приоритет. "
+                    "Позже приходит понимание, что «хорошо» и «спокойно погулять по сайту» архитектуры означает предсказуемость и документацию. "
+                    "В моей практике даже небольшие изменения в код-ревью и культуре обратной связи снижали число инцидентов вдвое. "
+                    "Мы не сравниваем бренды и не предлагаем платных продуктов — это личные заметки о менеджменте, обучении и долгосрочной мотивации. "
+                ) * 7
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/life/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 0
+            regime = LegalRegime.CLEAN_NON_AD
+            slots[SlotID.ORGANIC_INTEGRATION] = 1
+            days_ago = self.rng.randint(1, 40)
+
+        # Archetype 28: VC_CLEAN_TECH_CASE_TOKEN_PROSE (mentions bearer-токен loopback, zero erid)
+        elif archetype_id == 28:
+            text = (
+                "Отладка локального шлюза и авторизации при разработке микросервисов. "
+                "Чек-лист безопасности: 1) Сменить локальный bearer-токен loopback перед сборкой контейнера; "
+                "2) Проверить CORS и таймауты прокси; 3) Не хранить секреты в репозитории. "
+                "Пошаговая инструкция помогает разработчикам быстрее находить ошибки сетевого взаимодействия в Docker. "
+            ) * 2 + " Пример конфигурации открыт в репозитории: https://github.com/dev-team/local-gateway."
+            html = f"<article><pre>{text}</pre></article>"
+            url = f"https://vc.ru/dev/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 0
+            regime = LegalRegime.CLEAN_NON_AD
+            slots[SlotID.ANALYTICAL_SHIELD] = 1
+            days_ago = self.rng.randint(1, 30)
+
+        # Archetype 29: VC_LONG_COVERT_NATIVE_REF_LINK (long story or dev post + stealth ?ref=/utm_campaign/shortener link without erid)
+        elif archetype_id == 29:
+            brand = self.rng.choice(["TaskFlow", "FlowBit", "CloudNote", "AudioForge", "ZarubPay"])
+            b_slug = brand.lower()
+            variant_roll = self.rng.random()
+            if variant_roll < 0.45:
+                # Stealth long-form SEO story (4000-5500 chars) without CTA + tail ?ref= link
+                intro = (
+                    f"Как мы перестроили рутинные процессы в команде за две недели и упростили ежедневную работу. "
+                    "Долгое время сотрудники вручную собирали заметки и пересылали файлы в десятках чатов, теряя важные правки. "
+                    "В процессе работы я заметил, что четкий регламент и понятная структура экономят несколько часов в неделю. "
+                    "Ниже делюсь наблюдениями, примерами и ценами на базовый тариф от 490 руб. в месяц. "
+                ) * 11
+                ref_code = self.rng.randint(1000, 9999)
+                tail = (
+                    f"Подробнее расписал настройки {brand} в заметках, там же можно сравнить форматы файлов и варианты экспорта. "
+                    f"[Ссылки: https://{b_slug}.ai/?ref=ref_{ref_code}&utm_medium=article&utm_campaign=vc-{ref_code} "
+                    f"https://wuun.ru/rk{ref_code}]"
+                )
+                slots[SlotID.ORGANIC_INTEGRATION] = 1
+                slots[SlotID.CALL_TO_ACTION] = 0
+            elif variant_roll < 0.80:
+                # Pure IT/finance native longread (4000+ chars, only S00 + S02 prices/rubles + ?ref= link)
+                intro = (
+                    "На прошлой неделе столкнулся с блокировкой корпоративного аккаунта и искал способ оплатить подписку на рабочий софт. "
+                    "Стоимость продления вышла около 2000 рублей в месяц, комиссия на зарубежных картах отличалась в два раза. "
+                    "Сервис для выгрузки счетов и автоматизации платежей позволил быстро закрыть вопрос без лишней бюрократии. "
+                ) * 12
+                ref_code = self.rng.randint(100, 999)
+                tail = (
+                    f"Для подключения оплаты использовал инструмент {brand}, подробности по тарифам описал в обзоре. "
+                    f"[Ссылки: https://{b_slug}.io/?ref=vc{ref_code} https://helper-dev.com/docs]"
+                )
+                slots[SlotID.ORGANIC_INTEGRATION] = 0
+                slots[SlotID.CALL_TO_ACTION] = 0
+            else:
+                intro = (
+                    "Как мы автоматизировали рабочие процессы в команде и сократили рутину. "
+                    "Ниже разобрали экономику и стоимость внедрения инструментов на квартал. "
+                ) * 4
+                tail = (
+                    f"Мы перенесли процессы в сервис {brand}, действует скидка 25% по промокоду START{self.rng.randint(10, 99)}. "
+                    f"Посмотреть сервис можно по ссылке: https://{b_slug}.ai/?ref=vcru_case_{self.rng.randint(100, 999)}."
+                )
+                slots[SlotID.ORGANIC_INTEGRATION] = 1
+                slots[SlotID.CALL_TO_ACTION] = 1
+            text = intro + " " + tail
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/services/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 1
+            regime = LegalRegime.UNMARKED_AD_NO_ERID
+            slots[SlotID.OBJECT_IDENTITY] = 1
+            slots[SlotID.LINK_TOPOLOGY] = 1
+            slots[SlotID.COMMERCIAL_TERMS] = 1
+            days_ago = self.rng.randint(1, 20)
+
+        # Archetype 30: VC_HIDDEN_BOT_OR_MAXRU_PROMO (t.me/bot or max.ru link without erid)
+        elif archetype_id == 30:
+            bot_name = self.rng.choice(["SovoKino_bot", "NeuroVoice_bot", "DigestDeals_bot"])
+            chan = f"https://t.me/{bot_name}" if self.rng.random() < 0.65 else "https://max.ru/promo_helper_ai"
+            text = (
+                "Запустили удобного Telegram-помощника для быстрого подбора фильмов, подписок и скидок на сервисы. "
+                f"Уникальный алгоритм экономит время каждый день и выдает подборки за секунду — подписка всего 290 руб. в месяц. "
+                f"Переходите и запускайте прямо сейчас: {chan}"
+            )
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/ai/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 1
+            regime = LegalRegime.UNMARKED_AD_NO_ERID
+            slots[SlotID.OBJECT_IDENTITY] = 1
+            slots[SlotID.LINK_TOPOLOGY] = 1
+            slots[SlotID.CALL_TO_ACTION] = 1
+            slots[SlotID.COMMERCIAL_TERMS] = 1
+            days_ago = self.rng.randint(1, 25)
+
+        # Archetype 31: VC_INCOMPLETE_HASHTAG_REKLAMA_BARE_DOMAIN (#реклама + domain + @handle, no erid/INN)
+        elif archetype_id == 31:
+            dom = self.rng.choice(["svetville.ru", "decorstudio.ru", "mebelcraft.ru"])
+            handle = self.rng.choice(["@andrey_dobrosvet", "@manager_sales", "@studio_direct"])
+            text = (
+                f"Дизайнерское освещение и мебель под заказ для квартир и офисов от студии {dom}. "
+                f"Только до конца месяца скидка 15% на первую партию по предзаказу! "
+                f"За консультацией и расчетом сметы пишите в Telegram {handle} или заходите на {dom}. #реклама"
+            )
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/design/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 1
+            regime = LegalRegime.INCOMPLETE_MARKING_LABEL_OR_INN
+            slots[SlotID.OBJECT_IDENTITY] = 1
+            slots[SlotID.LINK_TOPOLOGY] = 1
+            slots[SlotID.AD_LABEL_MARK] = 1
+            slots[SlotID.COMMERCIAL_TERMS] = 1
+            days_ago = self.rng.randint(1, 25)
+
+        # Archetype 32: VC_MARKED_AD_LONG (Complete 18.1 compliance in long VC.ru article / TOP-N roundup)
+        elif archetype_id == 32:
+            inn = self._sample_inn(valid=True)
+            erid = self._sample_erid(valid=True)
+            if self.rng.random() < 0.5:
+                body = (
+                    "Подробный обзор облачной платформы «ТехноКлауд» для разворачивания аналитики и BI-отчетности в компаниях среднего бизнеса. "
+                    "Платформа ускоряет сбор метрик и снижает расходы на инфраструктуру до 30%. "
+                ) * 3
+                text = (
+                    f"{body} Тарифы начинаются от 4 900 руб./мес. "
+                    f"Оформить демо-доступ: https://technocloud-bi.ru/?utm_source=vc&utm_campaign=launch&erid={erid}. "
+                    f"Реклама. ООО «ТехноКлауд», ИНН {inn}, erid: {erid}."
+                )
+            else:
+                body = (
+                    "ТОП-5 нейросетей для обработки изображений и удаления фона онлайн в один клик. "
+                    "Сервис работает прямо в браузере, без установки сложных программ и работает стабильно без VPN. "
+                    "Мы протестировали качество контура, пакетную загрузку и стоимость генераций для карточек товаров. "
+                ) * 4
+                text = (
+                    f"{body} Реклама. ООО «МедиаИнструмент», ИНН {inn}, erid: {erid}. "
+                    f"[Ссылки: https://toolhub.ru?promo=14&erid={erid} https://s.tool-online.ru/a1b2 https://partner-ai.ru/?r=99]"
+                )
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/services/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 0
+            regime = LegalRegime.CLEAN_MARKED_AD
+            slots[SlotID.OBJECT_IDENTITY] = 1
+            slots[SlotID.COMMERCIAL_TERMS] = 1
+            slots[SlotID.LINK_TOPOLOGY] = 1
+            slots[SlotID.AD_LABEL_MARK] = 1
+            slots[SlotID.ADVERTISER_INFO] = 1
+            slots[SlotID.ERID_INTEGRITY] = 1
+            meta = {"is_promo": True, "erid": erid}
+            days_ago = self.rng.randint(1, 25)
+
+        # Archetype 33: CRYPTO_EXCHANGE_AFFILIATE_PROMO (Part 11 Art. 7 38-FZ with link + CTA)
+        else:
+            exch = self.rng.choice(["okx", "bybit"])
+            text = (
+                f"Лучшая криптобиржа {exch.upper()} с минимальными комиссиями для торговли биткоин и Ethereum! "
+                "Регистрируйся сейчас и купи первые монеты с бонусом до 500 USDT по промокоду CRYPTO2026! "
+                f"Переходи по партнерской ссылке: https://{exch}-partner.com/register?ref=vcbonus_{self.rng.randint(10, 99)}"
+            )
+            html = f"<article><p>{text}</p></article>"
+            url = f"https://vc.ru/crypto/{self.rng.randint(3100000, 3300000)}"
+            domain = "vc.ru"
+            context_mode = "EXTERNAL_PUBLICATION"
+            is_violation = 1
+            regime = LegalRegime.BANNED_OR_SPECIAL_REGIME
+            slots[SlotID.OBJECT_IDENTITY] = 1
+            slots[SlotID.CALL_TO_ACTION] = 1
+            slots[SlotID.LINK_TOPOLOGY] = 1
+            slots[SlotID.SPECIAL_BANNED] = 1
+            days_ago = self.rng.randint(1, 25)
 
         doc = DocumentInput(
             clean_text=text,
@@ -538,6 +813,7 @@ class ProceduralCaseSimulator:
             author_domain=domain,
             platform_ad_meta=meta,
             published_days_ago=days_ago,
+            context_mode=context_mode,
         )
         target = {
             "is_violation": is_violation,
@@ -547,10 +823,10 @@ class ProceduralCaseSimulator:
         return doc, target
 
     def generate_dataset(self, num_samples: int = 500) -> List[Tuple[DocumentInput, Dict[str, Any]]]:
-        """Generate a balanced dataset covering all 25 archetypes."""
+        """Generate a balanced dataset covering all 34 archetypes."""
         dataset = []
         for i in range(num_samples):
-            arch_id = i % 25
+            arch_id = i % 34
             dataset.append(self.generate_case(arch_id))
         self.rng.shuffle(dataset)
         return dataset

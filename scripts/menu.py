@@ -24,7 +24,7 @@ if sys.platform == "win32":
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 VENV_PYTHON = PROJECT_DIR / ".venv" / "Scripts" / "python.exe"
 VENV_ADRADAR = PROJECT_DIR / ".venv" / "Scripts" / "adradar.exe"
-DATA_DIR = Path("C:/AdRadarData")
+DATA_DIR = Path(os.environ.get("ADRADAR_DATA_DIR", "C:/AdRadarData"))
 
 # ANSI Color codes
 CYAN = "\033[96m"
@@ -133,9 +133,11 @@ def opt_site() -> None:
     print(f"\n{GREEN}[*] Запуск глубокого аудита сайта {clean_dom}...{RESET}")
     run_command([str(VENV_ADRADAR), "audit-site", "--domain", clean_dom, "--deep"])
 
-    target_dir = DATA_DIR / "reports" / "leads" / clean_dom
+    clean_slug = clean_dom.replace(".", "_")
+    target_dir = DATA_DIR / "reports" / "leads" / clean_slug
     if not target_dir.exists():
-        target_dir = DATA_DIR / "reports"
+        alt_dir = DATA_DIR / "reports" / "leads" / clean_dom
+        target_dir = alt_dir if alt_dir.exists() else DATA_DIR / "reports"
     print(f"\n{GREEN}[*] Открываю папку с отчетами в Проводнике: {target_dir}{RESET}")
     open_folder(target_dir)
 
@@ -145,19 +147,28 @@ def opt_visual() -> None:
     print(f"{CYAN}{BOLD}==============================================================================={RESET}")
     print(f"{CYAN}{BOLD} [4] ПУЛЬТ 15-СЕКУНДНОЙ ПРОВЕРКИ ЧЕЛОВЕКОМ + СНАЙПЕРСКИЕ СКРИНШОТЫ{RESET}")
     print(f"{CYAN}{BOLD}==============================================================================={RESET}\n")
-    
-    domain = safe_input("Введите домен или URL (например, athenachat.ai/ru): ").strip()
+
+    domain = safe_input("Введите домен (или оставьте пустым для пакетного --from-hunt): ").strip()
     if not domain:
-        print(f"{YELLOW}[!] Домен не указан.{RESET}")
+        print(f"\n{GREEN}[*] Запуск пакетного Visual QC по результатам VC.ru (--from-hunt)...{RESET}")
+        run_command([str(VENV_PYTHON), str(PROJECT_DIR / "scripts" / "run_visual_qc.py"), "--from-hunt"])
+        batch_index = DATA_DIR / "review_desk" / "index.html"
+        if batch_index.exists():
+            print(f"\n{GREEN}[*] Открываю сводный Пульт ОТК в браузере: {batch_index}{RESET}")
+            open_browser(batch_index)
+        else:
+            print(f"{YELLOW}[!] Сводный индекс {batch_index} не найден.{RESET}")
         return
 
     print(f"\n{GREEN}[*] Запуск браузера, захват зон, анализ сносок и неавторегрессионный замок Vega-U...{RESET}")
     run_command([str(VENV_PYTHON), str(PROJECT_DIR / "scripts" / "run_visual_qc.py"), "--domain", domain])
 
-    clean_slug = domain.replace("/", "_").replace(".", "_").replace(":", "_")
+    clean_dom = re.sub(r"^https?://", "", domain.strip().lower()).split("/")[0].split(":")[0]
+    if clean_dom.startswith("www."):
+        clean_dom = clean_dom[4:]
+    clean_slug = re.sub(r"[^a-zA-Z0-9_\-]", "_", clean_dom.replace(".", "_")).lower()
     desk_path = DATA_DIR / "review_desk" / clean_slug / "index.html"
     if not desk_path.exists():
-        # Fallback to the latest review desk
         rd_root = DATA_DIR / "review_desk"
         if rd_root.exists():
             candidates = sorted(rd_root.glob("*/index.html"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -241,6 +252,33 @@ def opt_lawyer_doc() -> None:
         print(f"\n{YELLOW}[!] Файл документа не найден.{RESET}")
 
 
+def opt_learn_desk() -> None:
+    clear_screen()
+    print(f"{CYAN}{BOLD}==============================================================================={RESET}")
+    print(f"{CYAN}{BOLD} [9] ИМПОРТ ВЕРДИКТОВ REVIEW DESK В КАЛИБРОВКУ (--from-desk){RESET}")
+    print(f"{CYAN}{BOLD}==============================================================================={RESET}\n")
+
+    fb_input = safe_input(
+        "Путь к файлу feedback_*.json (Enter — последний в Загрузках / review_desk): "
+    ).strip().strip('"')
+    fb_path: Path | None = Path(fb_input) if fb_input else None
+    if fb_path is None:
+        search_dirs = [Path.home() / "Downloads", DATA_DIR / "review_desk"]
+        candidates = [
+            p for d in search_dirs if d.exists() for p in d.glob("feedback_*.json")
+        ]
+        if candidates:
+            fb_path = max(candidates, key=lambda p: p.stat().st_mtime)
+            print(f"{GREEN}[*] Найден свежий файл вердиктов: {fb_path}{RESET}")
+
+    if fb_path is None or not fb_path.exists():
+        print(f"{YELLOW}[!] Файл feedback_*.json не найден.{RESET}")
+        return
+
+    print(f"\n{GREEN}[*] Загрузка вердиктов Review Desk в обучение калибровки...{RESET}")
+    run_command([str(VENV_ADRADAR), "learn", "--from-desk", str(fb_path)])
+
+
 def main() -> None:
     if os.environ.get("ADRADAR_NON_INTERACTIVE") == "1":
         print("[*] ADRADAR_NON_INTERACTIVE=1: menu automated smoke check passed.")
@@ -262,12 +300,13 @@ def main() -> None:
         print(f"  {GREEN}{BOLD}[5]{RESET}  Собрать платный комплект за 14 900 руб. (Политика, формы, дисклеймеры)")
         print(f"  {GREEN}{BOLD}[6]{RESET}  Прогноз рисков компании на год вперед (планирование горизонта)")
         print(f"  {GREEN}{BOLD}[7]{RESET}  Утренняя проверка здоровья системы (лицензии, реестры РКН и ФНС)")
-        print(f"  {GREEN}{BOLD}[8]{RESET}  Выгрузить Юридический Паспорт системы для проверки юристом\n")
+        print(f"  {GREEN}{BOLD}[8]{RESET}  Выгрузить Юридический Паспорт системы для проверки юристом")
+        print(f"  {GREEN}{BOLD}[9]{RESET}  Импорт вердиктов Review Desk в обучение (feedback_*.json -> learn)\n")
         print(f"  {YELLOW}{BOLD}[0]{RESET}  Выход")
         print(f"{CYAN}{BOLD}==============================================================================={RESET}")
 
         try:
-            choice = safe_input(f"\n{BOLD}Выберите действие [1-8, 0]: {RESET}", default="0").strip()
+            choice = safe_input(f"\n{BOLD}Выберите действие [1-9, 0]: {RESET}", default="0").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nДо свидания!")
             break
@@ -288,11 +327,13 @@ def main() -> None:
             opt_doctor()
         elif choice == "8":
             opt_lawyer_doc()
+        elif choice == "9":
+            opt_learn_desk()
         elif choice == "0":
             print(f"\n{GREEN}Завершение работы AdRadar. Всего доброго!{RESET}\n")
             break
         else:
-            print(f"\n{RED}[!] Неверный выбор. Введите цифру от 0 до 8.{RESET}")
+            print(f"\n{RED}[!] Неверный выбор. Введите цифру от 0 до 9.{RESET}")
 
         safe_input(f"\n{DIM}Нажмите Enter для возврата в меню...{RESET}")
 

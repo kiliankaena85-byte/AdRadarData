@@ -20,6 +20,9 @@ dependencies = [
     "lxml>=5.0.0",
     "onnx>=1.15.0",
     "onnxruntime>=1.17.0",
+    "pyyaml>=6.0",
+    "httpx>=0.25.0",
+    "aiohttp>=3.9.0",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +39,10 @@ dev = [
 adradar = "legal_sheaf.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/legal_sheaf"]
+packages = ["src/legal_sheaf", "src/ingestion"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/showcase_server.py" = "showcase_server.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

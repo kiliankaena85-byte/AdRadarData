@@ -27,8 +27,9 @@ import torch
 from legal_sheaf.bundle import AdRadarBrainBundle
 from legal_sheaf.chronotope import TemporalDecision, TemporalValidityGate, TemporalValidityStatus
 from legal_sheaf.continual_learner import ContinualLearner, calculate_psi, ingest_kb_inbox
+from legal_sheaf.link_classifier import LinkCentricAdClassifierV3
+from legal_sheaf.link_features import FEATURE_DIM, FEATURE_NAMES
 from legal_sheaf.schema import DocumentInput, LegalRegime
-from legal_sheaf.sheaf_model import LegalSheafNet16x41
 from training.procedural_case_sim import ProceduralCaseSimulator
 
 
@@ -108,19 +109,20 @@ def test_plasticity_without_catastrophic_forgetting(champion_bundle):
     golden_dataset = []
     for _ in range(120):
         doc, target = sim.generate_case()
-        t = champion_bundle._feature_builder.build_document_tensor(doc)
+        t = champion_bundle._feature_builder.build_feature_vector(doc)
         golden_dataset.append((t, int(target["is_violation"])))
 
     # 2. Synthesize Novel Evasion Pattern: Telegram Bot Secret Codewords
     novel_feedback = []
     for i in range(30):
-        # Create synthetic tensor representing subtle CTA / Messenger bypass
-        t_novel = torch.zeros(16, 36)
-        t_novel[0, :5] = 0.85  # Object identity strong
-        t_novel[1, :5] = 0.70  # Attention focus
-        t_novel[3, :5] = 0.95  # CTA disguised into messenger codeword
-        t_novel[4, :5] = 0.00  # Zero standard link (uses t.me handle)
-        t_novel[7, :5] = 0.00  # No ERID
+        # Create synthetic 48-dim feature vector representing subtle CTA / Messenger bypass
+        t_novel = torch.zeros(FEATURE_DIM, dtype=torch.float32)
+        t_novel[FEATURE_NAMES.index("has_any_commercial_target")] = 1.0
+        t_novel[FEATURE_NAMES.index("has_messenger_bot_or_max")] = 1.0
+        t_novel[FEATURE_NAMES.index("win_has_promo_code_or_giveaway")] = 1.0
+        t_novel[FEATURE_NAMES.index("win_has_cta_imperative")] = 1.0
+        t_novel[FEATURE_NAMES.index("lead_proto_2_tg_bot_aff")] = 0.85
+        t_novel[FEATURE_NAMES.index("link_proto_2_tg_bot_aff")] = 0.90
         novel_feedback.append((t_novel, 1))  # Ground truth violation
 
     # Train challenger with experience replay
@@ -160,18 +162,18 @@ def test_poisoned_feedback_rejection_gate(champion_bundle):
     golden_dataset = []
     for _ in range(80):
         doc, target = sim.generate_case()
-        t = champion_bundle._feature_builder.build_document_tensor(doc)
+        t = champion_bundle._feature_builder.build_feature_vector(doc)
         golden_dataset.append((t, int(target["is_violation"])))
 
     # Adversarial poisoned feedback: clear violations falsely labeled as safe (0)
     poisoned_feedback = []
     for _ in range(40):
         doc, target = sim.generate_case(archetype_id=1)  # Clear commercial violation
-        t = champion_bundle._feature_builder.build_document_tensor(doc)
+        t = champion_bundle._feature_builder.build_feature_vector(doc)
         poisoned_feedback.append((t, 0))  # Poisoned label!
 
     # Execute gate with an intentionally corrupted/degraded challenger
-    corrupted_challenger = LegalSheafNet16x41().to(learner.device)
+    corrupted_challenger = LinkCentricAdClassifierV3().to(learner.device)
     # Zero out weights to simulate catastrophic failure
     for p in corrupted_challenger.parameters():
         p.data.fill_(0.0)

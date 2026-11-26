@@ -26,7 +26,7 @@ os.environ["USE_TF"] = "0"
 logger = logging.getLogger("verification_engine.sheaf_vega_verifier")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-CONFIG_DIR = ROOT_DIR / "config"
+CONFIG_DIR = ROOT_DIR / "legal_sheaf_verifier" / "config"
 CALIBRATION_DIR = Path(os.environ.get("ADRADAR_DATA_DIR", "C:\\AdRadarData")) / "models" / "vega_calibrated"
 
 
@@ -67,7 +67,7 @@ def load_citations_whitelist() -> Tuple[Set[str], Set[str], Set[str]]:
     """Loads closed whitelist of verified court cases, KoAP articles, and federal laws."""
     wl_path = CONFIG_DIR / "verified_citations_whitelist.yaml"
     if not wl_path.exists():
-        wl_path = ROOT_DIR / "legal_sheaf_verifier" / "config" / "verified_citations_whitelist.yaml"
+        wl_path = Path.cwd() / "legal_sheaf_verifier" / "config" / "verified_citations_whitelist.yaml"
     if not wl_path.exists():
         return set(), set(), set()
     try:

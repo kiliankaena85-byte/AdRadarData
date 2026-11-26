@@ -48,7 +48,7 @@ from legal_sheaf.scanner_152fz import (
 from legal_sheaf.schema import DocumentInput
 
 SOURCE_REPORT_PATH = Path("C:/AdRadarData/reports/real_ru_audit_294.json")
-BUNDLE_V2_PATH = Path("C:/AdRadarData/models/champion_v2.bundle")
+BUNDLE_V2_PATH = Path("C:/AdRadarData/models/champion_v3.bundle")
 OUTPUT_LEADS_DIR = Path("C:/AdRadarData/reports/leads_v2")
 RECALIBRATED_REPORT_PATH = Path("C:/AdRadarData/reports/recalibrated_audit_v2.json")
 

@@ -1,16 +1,15 @@
 """
-Continual Learning Engine and Champion/Challenger Gate for LegalSheafNet.
+Continual Learning Engine and Champion/Challenger Gate for LinkCentricAdClassifierV3.
 Implements:
-1. Zero-Retrain Law Ingestion (Hot-swap of legal norms and FAS letters via vector index).
-2. Population Stability Index (PSI) Feature Drift Detector across 16 slots.
-3. Experience Replay Buffer (75% Invariant Golden Archetypes + 25% New Feedback).
+1. Zero-Retrain Law Ingestion (Hot-swap of legal norms and FAS letters via reference KB vector index).
+2. Population Stability Index (PSI) Feature Drift Detector across N features (48 in v3, 16 legacy).
+3. Experience Replay Buffer (75% Invariant Golden Cases + 25% New Feedback).
 4. L2-SP Regularization against Champion parameters to prevent catastrophic forgetting.
 5. Promotion Gate enforcing Precision >= 0.96 and ECE <= 0.05 before deployment.
 """
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import math
@@ -22,17 +21,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 
 from legal_sheaf.bundle import AdRadarBrainBundle
 from legal_sheaf.calibration import ConformalCalibrator, compute_ece
 from legal_sheaf.config import ARTIFACTS_DIR
-from legal_sheaf.feature_builder import SlotFeatureBuilder
-from legal_sheaf.losses import MultiTaskSheafLoss
-from legal_sheaf.onnx_runtime import export_sheaf_to_onnx
+from legal_sheaf.link_classifier import LinkCentricAdClassifierV3
+from legal_sheaf.link_features import compute_ngram_hash_vector
+from legal_sheaf.onnx_runtime import export_link_classifier_to_onnx
 from legal_sheaf.precedent_index import LegalPrecedentIndex
-from legal_sheaf.schema import DocumentInput, LegalRegime
-from legal_sheaf.sheaf_model import LegalSheafNet16x41
 
 logger = logging.getLogger("legal_sheaf.continual_learner")
 
@@ -48,11 +44,10 @@ def calculate_psi(
     epsilon: float = 1e-4,
 ) -> Dict[str, Any]:
     """
-    Computes Population Stability Index (PSI) for each of the 16 slots.
-    baseline_matrix: [N_base, 16] or [N_base, 16, F]
-    current_matrix:  [N_curr, 16] or [N_curr, 16, F]
+    Computes Population Stability Index (PSI) across each feature/slot column.
+    baseline_matrix: [N_base, D] or [N_base, D, F]
+    current_matrix:  [N_curr, D] or [N_curr, D, F]
     """
-    # If 3D, take mean across feature dimension to get per-slot intensity [N, 16]
     if baseline_matrix.ndim == 3:
         b_mat = np.mean(baseline_matrix, axis=-1)
         c_mat = np.mean(current_matrix, axis=-1)
@@ -60,33 +55,28 @@ def calculate_psi(
         b_mat = baseline_matrix
         c_mat = current_matrix
 
-    num_slots = b_mat.shape[1]
+    num_cols = b_mat.shape[1]
     slot_psi: Dict[int, float] = {}
     drifted_slots: List[Dict[str, Any]] = []
 
-    for s in range(num_slots):
+    for s in range(num_cols):
         b_vals = b_mat[:, s]
         c_vals = c_mat[:, s]
 
-        # Determine bin edges from baseline quantiles
         quantiles = np.linspace(0, 100, num_bins + 1)
         bin_edges = np.percentile(b_vals, quantiles)
-        bin_edges = np.unique(bin_edges)  # Remove duplicates if constant
+        bin_edges = np.unique(bin_edges)
 
         if len(bin_edges) < 2:
-            # Baseline is constant for this slot
             diff = np.abs(np.mean(c_vals) - np.mean(b_vals))
             psi = float(diff * 10.0)
         else:
-            # Standard continuous PSI: outer bins must cover (-inf, +inf)
-            # so that out-of-range shifted values are captured in edge bins
             bin_edges[0] = -np.inf
             bin_edges[-1] = np.inf
 
             b_counts, _ = np.histogram(b_vals, bins=bin_edges)
             c_counts, _ = np.histogram(c_vals, bins=bin_edges)
 
-            # Convert to proportions with smoothing
             p = (b_counts + epsilon) / (np.sum(b_counts) + epsilon * len(b_counts))
             q = (c_counts + epsilon) / (np.sum(c_counts) + epsilon * len(c_counts))
 
@@ -132,8 +122,7 @@ def ingest_kb_inbox(
 ) -> Tuple[AdRadarBrainBundle, int]:
     """
     Ingests new statutes, amendments, FAS letters, and court cases from inbox directory
-    directly into the bundle's precedent index and vector matrix WITHOUT retraining neural weights.
-    Returns: (updated_bundle, count_new_ingested)
+    directly into the bundle's reference KB index WITHOUT retraining classifier weights.
     """
     inbox_path = Path(inbox_dir)
     if not inbox_path.exists():
@@ -160,24 +149,27 @@ def ingest_kb_inbox(
     if not new_items:
         return bundle, 0
 
-    # Build new embeddings and format records
     existing_precedents = list(bundle.precedents)
-    existing_embeddings = bundle.precedent_embeddings  # [N, dim]
+    existing_embeddings = bundle.precedent_embeddings
     new_embeddings_list = []
     dates_found = []
 
     dim = existing_embeddings.shape[1] if existing_embeddings.ndim > 1 else 256
-    prec_idx = bundle._precedent_index or LegalPrecedentIndex(use_fast_ngram_fallback=True)
+    prec_idx = bundle._precedent_index or LegalPrecedentIndex(use_fast_ngram_fallback=(dim == 256))
 
     for item in new_items:
-        # Standardize fields
         text = f"{item.get('title', '')} {item.get('text', item.get('summary', ''))}"
         item["_search_text"] = text
         item["_type"] = item.get("type", "statute")
         item["_is_guilty"] = not item.get("is_exemption", False)
         item["_is_safe"] = item.get("is_exemption", False)
 
-        vec = prec_idx._compute_ngram_hash_vector(text, dim=dim)
+        if not prec_idx.use_fast_ngram_fallback and prec_idx.encoder is not None and dim != 256:
+            vec = prec_idx.encoder.encode(
+                [text], convert_to_numpy=True, normalize_embeddings=True
+            )[0].astype(np.float32)
+        else:
+            vec = compute_ngram_hash_vector(text, dim=dim)
         new_embeddings_list.append(vec)
         existing_precedents.append(item)
 
@@ -188,7 +180,6 @@ def ingest_kb_inbox(
     new_embeddings = np.stack(new_embeddings_list, axis=0)
     combined_embeddings = np.vstack([existing_embeddings, new_embeddings])
 
-    # Update manifest
     updated_manifest = dict(bundle.manifest)
     updated_manifest["num_precedents"] = len(existing_precedents)
     if dates_found:
@@ -204,6 +195,7 @@ def ingest_kb_inbox(
         precedents=existing_precedents,
         precedent_embeddings=combined_embeddings,
         manifest=updated_manifest,
+        feature_schema=bundle.feature_schema,
     )
     logger.info(f"Ingested {len(new_items)} new legal items into bundle without code change.")
     return updated_bundle, len(new_items)
@@ -228,7 +220,7 @@ class PromotionDecision:
 class ContinualLearner:
     """
     Continual Learning Engine with Experience Replay, L2-SP Regularization,
-    and strict Champion/Challenger Quality Gate.
+    and strict Champion/Challenger Quality Gate for LinkCentricAdClassifierV3.
     """
 
     def __init__(
@@ -247,15 +239,20 @@ class ContinualLearner:
     def _init_torch_model_from_checkpoint(
         self,
         checkpoint_path: Optional[Union[str, Path]] = None,
-    ) -> LegalSheafNet16x41:
-        """Loads PyTorch model for training."""
-        model = LegalSheafNet16x41().to(self.device)
-        ckpt_path = Path(checkpoint_path) if checkpoint_path else ARTIFACTS_DIR / "legal_sheaf_model.pt"
+    ) -> LinkCentricAdClassifierV3:
+        """Loads PyTorch LinkCentricAdClassifierV3 model for continual training."""
+        model = LinkCentricAdClassifierV3().to(self.device)
+        ckpt_path = Path(checkpoint_path) if checkpoint_path else ARTIFACTS_DIR / "link_classifier_v3.pt"
+        if not ckpt_path.exists():
+            pkg_ckpt = Path(__file__).resolve().parents[2] / "artifacts" / "link_classifier_v3.pt"
+            if pkg_ckpt.exists():
+                ckpt_path = pkg_ckpt
         if ckpt_path.exists():
-            ckpt = torch.load(ckpt_path, map_location=self.device)
+            ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
             model.load_state_dict(ckpt["model_state_dict"])
         if hasattr(self, "champion_bundle") and hasattr(self.champion_bundle, "calibration"):
-            model.temperature = float(self.champion_bundle.calibration.get("temperature", 1.0) or 1.0)
+            cal = self.champion_bundle.calibration
+            model.temperature = float(cal.get("temperature_val") or cal.get("temperature") or 1.0)
         else:
             model.temperature = 1.0
         return model
@@ -263,7 +260,7 @@ class ContinualLearner:
     def evaluate_model_on_dataset(
         self,
         model: nn.Module,
-        dataset: List[Tuple[torch.Tensor, int]],  # [(tensor[16, 36], label)]
+        dataset: List[Tuple[torch.Tensor, int]],  # [(tensor[48], label)]
         threshold: float,
     ) -> Dict[str, float]:
         """Evaluates precision, recall, and ECE for binary violation detection."""
@@ -274,7 +271,7 @@ class ContinualLearner:
 
         with torch.no_grad():
             for x, y in dataset:
-                if x.ndim == 2:
+                if x.ndim == 1:
                     x = x.unsqueeze(0)
                 x = x.to(self.device)
                 out = model(x)
@@ -308,40 +305,38 @@ class ContinualLearner:
 
     def train_challenger(
         self,
-        golden_data: List[Tuple[torch.Tensor, int]],     # 75% invariant archetypes
-        new_feedback: List[Tuple[torch.Tensor, int]],    # 25% verified feedback
-        epochs: int = 8,
-        lr: float = 1e-4,
-    ) -> Tuple[LegalSheafNet16x41, float]:
+        golden_data: List[Tuple[torch.Tensor, int]],     # 75% invariant cases [48]
+        new_feedback: List[Tuple[torch.Tensor, int]],    # 25% verified feedback [48]
+        epochs: int = 12,
+        lr: float = 3e-4,
+    ) -> Tuple[LinkCentricAdClassifierV3, float]:
         """
         Trains challenger using Experience Replay and L2-SP Regularization:
-        L = L_bce + (lambda_sp / 2) * ||theta - theta_champion||^2 + lambda_orth * L_orth
+        L = L_bce + (lambda_sp / 2) * ||theta - theta_champion||^2
         """
         challenger = self._init_torch_model_from_checkpoint()
         champion_params = {n: p.clone().detach() for n, p in challenger.named_parameters()}
 
-        # Experience Replay Mixing (75% golden, 25% new)
-        replay_samples = []
-        # Oversample new feedback to reach target 25% ratio if small
+        replay_samples: List[Tuple[torch.Tensor, int]] = []
         n_golden = len(golden_data)
         target_new = max(len(new_feedback), int(n_golden * 0.25))
-        
+
         replay_samples.extend(golden_data)
         if new_feedback:
             factor = math.ceil(target_new / len(new_feedback))
             extended_new = (new_feedback * factor)[:target_new]
             replay_samples.extend(extended_new)
 
-        optimizer = torch.optim.AdamW(challenger.parameters(), lr=lr, weight_decay=1e-5)
+        optimizer = torch.optim.AdamW(challenger.parameters(), lr=lr, weight_decay=1e-4)
         criterion = nn.BCEWithLogitsLoss()
+        rng = np.random.default_rng(42)
 
         challenger.train()
-        for epoch in range(epochs):
-            np.random.shuffle(replay_samples)
-            total_loss = 0.0
-
-            for x, y in replay_samples:
-                if x.ndim == 2:
+        for _ in range(epochs):
+            order = rng.permutation(len(replay_samples))
+            for idx in order:
+                x, y = replay_samples[int(idx)]
+                if x.ndim == 1:
                     x = x.unsqueeze(0)
                 x = x.to(self.device)
                 target = torch.tensor([[float(y)]], device=self.device)
@@ -350,30 +345,22 @@ class ContinualLearner:
                 out = challenger(x)
                 viol_logit = out["violation_logit"]
 
-                # 1. Task loss
                 loss_task = criterion(viol_logit, target)
-
-                # 2. L2-SP Regularization towards Champion parameters
                 l2_sp = torch.tensor(0.0, device=self.device)
                 for n, p in challenger.named_parameters():
                     if n in champion_params:
                         l2_sp = l2_sp + torch.sum((p - champion_params[n]) ** 2)
 
-                # 3. Sheaf Stiefel Orthogonality
-                l_orth = challenger.compute_stiefel_orthogonality_loss()
-
-                loss = loss_task + (self.lambda_sp * 0.5 * l2_sp) + (0.01 * l_orth)
+                loss = loss_task + (self.lambda_sp * 0.5 * l2_sp)
                 loss.backward()
                 optimizer.step()
-                total_loss += loss.item()
 
-        # Recalibrate conformal threshold on golden data
         challenger.eval()
         logits_list = []
         labels_list = []
         with torch.no_grad():
             for x, y in golden_data:
-                if x.ndim == 2:
+                if x.ndim == 1:
                     x = x.unsqueeze(0)
                 out = challenger(x.to(self.device))
                 logits_list.append(float(out["violation_logit"].view(-1)[0].item()))
@@ -390,9 +377,9 @@ class ContinualLearner:
         self,
         golden_dataset: List[Tuple[torch.Tensor, int]],
         new_feedback: List[Tuple[torch.Tensor, int]],
-        challenger_model: Optional[LegalSheafNet16x41] = None,
+        challenger_model: Optional[LinkCentricAdClassifierV3] = None,
         challenger_threshold: Optional[float] = None,
-        epochs: int = 8,
+        epochs: int = 12,
     ) -> Tuple[PromotionDecision, Optional[AdRadarBrainBundle]]:
         """
         Executes full continual learning loop and gate:
@@ -400,15 +387,12 @@ class ContinualLearner:
         2. Evaluates Champion on new data.
         3. Evaluates Challenger on Golden set (invariants) and New data.
         4. Verifies Gate: Golden Precision >= 0.96, Golden ECE <= 0.05, New Recall improved.
-        5. Returns PromotionDecision and new Champion bundle if promoted.
         """
-        # Baseline Champion performance
         champ_calib_thresh = self.champion_bundle.decision_threshold
         champ_model = self._init_torch_model_from_checkpoint()
         champ_new_eval = self.evaluate_model_on_dataset(champ_model, new_feedback, champ_calib_thresh)
         champ_new_recall = champ_new_eval["recall"]
 
-        # Train challenger if not passed
         if challenger_model is None or challenger_threshold is None:
             challenger_model, challenger_threshold = self.train_challenger(
                 golden_data=golden_dataset,
@@ -416,7 +400,6 @@ class ContinualLearner:
                 epochs=epochs,
             )
 
-        # Evaluate Challenger
         golden_eval = self.evaluate_model_on_dataset(challenger_model, golden_dataset, challenger_threshold)
         challenger_new_eval = self.evaluate_model_on_dataset(challenger_model, new_feedback, challenger_threshold)
 
@@ -425,13 +408,11 @@ class ContinualLearner:
         gold_ece = golden_eval["ece"]
         chal_new_recall = challenger_new_eval["recall"]
 
-        # Gate Checks
         gate_1_precision = gold_prec >= self.target_precision
         gate_2_ece = gold_ece <= self.max_ece
         gate_3_recall = chal_new_recall >= champ_new_recall
 
         if gate_1_precision and gate_2_ece and gate_3_recall:
-            # PROMOTION GRANTED
             reason = (
                 f"Promotion APPROVED: Golden Precision {gold_prec} >= {self.target_precision}, "
                 f"ECE {gold_ece} <= {self.max_ece}, and New Recall improved from {champ_new_recall} to {chal_new_recall}."
@@ -447,18 +428,18 @@ class ContinualLearner:
                 metrics={**golden_eval, "new_recall": chal_new_recall},
             )
 
-            # Export new ONNX model and build promoted bundle
             tmp_onnx = ARTIFACTS_DIR / "challenger_promoted.onnx"
-            export_sheaf_to_onnx(challenger_model, tmp_onnx)
+            export_link_classifier_to_onnx(challenger_model, tmp_onnx, device="cpu")
             with open(tmp_onnx, "rb") as f:
                 new_onnx_bytes = f.read()
             tmp_onnx.unlink(missing_ok=True)
 
             new_calib = dict(self.champion_bundle.calibration)
             new_calib["decision_threshold"] = challenger_threshold
+            new_calib["temperature_val"] = float(getattr(challenger_model, "temperature", 1.0) or 1.0)
 
             new_manifest = dict(self.champion_bundle.manifest)
-            ver_parts = new_manifest.get("bundle_version", "1.0.0").split(".")
+            ver_parts = new_manifest.get("bundle_version", "3.0.0").split(".")
             ver_parts[-1] = str(int(ver_parts[-1]) + 1)
             new_manifest["bundle_version"] = ".".join(ver_parts)
             new_manifest["certified_metrics"] = {
@@ -475,30 +456,29 @@ class ContinualLearner:
                 precedents=self.champion_bundle.precedents,
                 precedent_embeddings=self.champion_bundle.precedent_embeddings,
                 manifest=new_manifest,
+                feature_schema=self.champion_bundle.feature_schema,
             )
             logger.info(f"Champion promoted to version {new_manifest['bundle_version']}: {reason}")
             return decision, promoted_bundle
 
-        else:
-            # PROMOTION REJECTED
-            failures = []
-            if not gate_1_precision:
-                failures.append(f"Golden Precision {gold_prec} < {self.target_precision}")
-            if not gate_2_ece:
-                failures.append(f"Golden ECE {gold_ece} > {self.max_ece}")
-            if not gate_3_recall:
-                failures.append(f"New Recall {chal_new_recall} < Champion Recall {champ_new_recall}")
+        failures = []
+        if not gate_1_precision:
+            failures.append(f"Golden Precision {gold_prec} < {self.target_precision}")
+        if not gate_2_ece:
+            failures.append(f"Golden ECE {gold_ece} > {self.max_ece}")
+        if not gate_3_recall:
+            failures.append(f"New Recall {chal_new_recall} < Champion Recall {champ_new_recall}")
 
-            reason = f"Promotion REJECTED: {', '.join(failures)}. Rollback to Champion."
-            decision = PromotionDecision(
-                promoted=False,
-                reason=reason,
-                golden_precision=gold_prec,
-                golden_recall=gold_rec,
-                golden_ece=gold_ece,
-                new_recall=chal_new_recall,
-                champion_new_recall=champ_new_recall,
-                metrics={**golden_eval, "new_recall": chal_new_recall},
-            )
-            logger.warning(reason)
-            return decision, None
+        reason = f"Promotion REJECTED: {', '.join(failures)}. Rollback to Champion."
+        decision = PromotionDecision(
+            promoted=False,
+            reason=reason,
+            golden_precision=gold_prec,
+            golden_recall=gold_rec,
+            golden_ece=gold_ece,
+            new_recall=chal_new_recall,
+            champion_new_recall=champ_new_recall,
+            metrics={**golden_eval, "new_recall": chal_new_recall},
+        )
+        logger.warning(reason)
+        return decision, None

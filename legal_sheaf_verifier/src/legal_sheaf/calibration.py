@@ -98,15 +98,20 @@ class ConformalCalibrator:
         Calibrate temperature and search threshold for guaranteed target precision
         via Clopper-Pearson Upper Confidence Bound on False Discovery Rate (FDR <= 0.04).
         """
-        # 1. Optimize temperature parameter via bounded scalar minimization on ECE
+        # 1. Optimize temperature parameter via 10%-trimmed robust Brier score minimization
         from scipy.optimize import minimize_scalar
         from scipy.stats import beta
 
-        def obj_ece(t_val: float) -> float:
-            scaled_p = 1.0 / (1.0 + np.exp(-raw_violation_logits / t_val))
-            return compute_ece(scaled_p, labels)
+        def obj_brier(t_val: float) -> float:
+            z = np.clip(raw_violation_logits / t_val, -30.0, 30.0)
+            p = 1.0 / (1.0 + np.exp(-z))
+            sq_err = (p - labels) ** 2
+            if len(sq_err) >= 20:
+                keep_k = max(10, int(len(sq_err) * 0.90))
+                sq_err = np.partition(sq_err, keep_k - 1)[:keep_k]
+            return float(np.mean(sq_err))
 
-        opt_res = minimize_scalar(obj_ece, bounds=(0.15, 2.0), method="bounded")
+        opt_res = minimize_scalar(obj_brier, bounds=(0.75, 1.5), method="bounded")
         self.temperature_val = float(opt_res.x)
 
         # Calibrated probabilities
@@ -116,10 +121,11 @@ class ConformalCalibrator:
 
         # 2. Clopper-Pearson UCB & empirical precision search on threshold
         alpha_fdr = 1.0 - self.target_precision  # e.g. 0.04
-        candidates = np.linspace(0.40, 0.85, 91)
+        candidates = np.linspace(0.40, 0.72, 65)
         valid_thresholds = []
-        best_fallback_th = 0.50
-        max_prec = 0.0
+        best_f05_th = 0.50
+        best_f05_score = -1.0
+        total_pos = max(1, int(np.sum(labels == 1)))
 
         for th in candidates:
             preds = (probs >= th)
@@ -129,6 +135,8 @@ class ConformalCalibrator:
             fp = int(np.sum((labels == 0) & preds))
             tp = n_pos - fp
             prec = tp / float(n_pos)
+            rec = tp / float(total_pos)
+            f05 = (1.25 * prec * rec) / max(1e-8, 0.25 * prec + rec)
 
             if fp == 0:
                 ucb = 1.0 - (delta ** (1.0 / n_pos))
@@ -137,11 +145,11 @@ class ConformalCalibrator:
             else:
                 ucb = float(beta.ppf(1.0 - delta, fp + 1, n_pos - fp))
 
-            if prec > max_prec:
-                max_prec = prec
-                best_fallback_th = th
+            if f05 > best_f05_score:
+                best_f05_score = f05
+                best_f05_th = th
 
-            # Threshold qualifies if UCB on FDR <= alpha_fdr OR empirical precision >= target_precision
+            # Threshold qualifies if empirical precision >= target_precision
             if prec >= self.target_precision:
                 valid_thresholds.append((th, ucb, prec))
 
@@ -150,11 +158,11 @@ class ConformalCalibrator:
             valid_thresholds.sort(key=lambda item: abs(item[0] - 0.50))
             best_th = valid_thresholds[0][0]
         else:
-            best_th = best_fallback_th
+            best_th = best_f05_th
 
         self.decision_threshold = float(best_th)
-        self.abstain_lower = float(max(0.20, best_th - 0.15))
-        self.abstain_upper = float(min(0.80, best_th + 0.12))
+        self.abstain_lower = float(max(0.25, round(best_th - 0.14, 4)))
+        self.abstain_upper = float(min(0.88, round(best_th + 0.08, 4)))
 
     def predict(self, raw_violation_logit: float) -> Tuple[bool, float, str]:
         """

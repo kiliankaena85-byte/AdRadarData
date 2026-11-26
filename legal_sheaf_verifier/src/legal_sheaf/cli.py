@@ -43,11 +43,11 @@ from legal_sheaf.schema import DocumentInput, LegalRegime
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("adradar.cli")
 
-CHAMPION_BUNDLE_PATH = MODELS_CACHE_DIR / "champion_v2.bundle"
-if not CHAMPION_BUNDLE_PATH.exists() and (ARTIFACTS_DIR / "champion_v2.bundle").exists():
-    CHAMPION_BUNDLE_PATH = ARTIFACTS_DIR / "champion_v2.bundle"
-elif not CHAMPION_BUNDLE_PATH.exists() and (MODELS_CACHE_DIR / "champion_v1.bundle").exists():
-    CHAMPION_BUNDLE_PATH = MODELS_CACHE_DIR / "champion_v1.bundle"
+CHAMPION_BUNDLE_PATH = MODELS_CACHE_DIR / "champion_v3.bundle"
+if not CHAMPION_BUNDLE_PATH.exists() and (ARTIFACTS_DIR / "champion_v3.bundle").exists():
+    CHAMPION_BUNDLE_PATH = ARTIFACTS_DIR / "champion_v3.bundle"
+elif not CHAMPION_BUNDLE_PATH.exists() and (MODELS_CACHE_DIR / "champion_v2.bundle").exists():
+    CHAMPION_BUNDLE_PATH = MODELS_CACHE_DIR / "champion_v2.bundle"
 
 
 def get_champion_bundle() -> AdRadarBrainBundle:
@@ -117,7 +117,13 @@ def check_stream_anomaly(
 # -----------------------------------------------------------------------------
 def cmd_audit_article(args: argparse.Namespace) -> int:
     """Executes single-tier article audit in EXTERNAL_PUBLICATION mode."""
-    auditor = DualAuditor(bundle=get_champion_bundle())
+    use_vega = bool(getattr(args, "vega_grey_zone", False) or os.environ.get("ADRADAR_VEGA_GREY_ZONE") == "1")
+    verify_links = bool(getattr(args, "verify_links", True)) and os.environ.get("ADRADAR_VERIFY_LINKS") != "0"
+    auditor = DualAuditor(
+        bundle=get_champion_bundle(),
+        enable_vega_grey_zone=use_vega,
+        enable_live_link_verifier=verify_links,
+    )
     url = args.url
     text = args.text
 
@@ -133,9 +139,35 @@ def cmd_audit_article(args: argparse.Namespace) -> int:
     print(f"  Mode            : {res.get('context_mode')}")
     print(f"  38-FZ Scenario  : {res.get('scenario_38fz')}")
     print(f"  Erid Token      : {res.get('erid_token') or 'None'}")
+    pla = res.get("per_link_erid_audit") or {}
+    if pla.get("total_commercial_links", 0) > 0:
+        print(
+            f"  Per-Link erid   : {pla.get('marked_links_count', 0)}/{pla.get('total_commercial_links', 0)} marked "
+            f"(unmarked={pla.get('unmarked_links_count', 0)}, invalid={pla.get('invalid_erid_links_count', 0)})"
+        )
     print(f"  Verdict         : {res.get('verdict_38fz')}")
     if res.get("commercial_links"):
         print(f"  Commercial Links: {', '.join(res.get('commercial_links')[:3])}")
+    live_links = res.get("link_landing_verifications") or []
+    if live_links:
+        print("  Live Link/Landing Probes:")
+        for lv in live_links[:3]:
+            flags = []
+            if lv.get("hidden_erid_revealed"):
+                flags.append(f"erid={lv['hidden_erid_revealed']}")
+            if lv.get("hidden_affiliate_network_detected"):
+                flags.append("CPA_NET")
+            if lv.get("hidden_tracking_revealed"):
+                flags.append("TRACKING")
+            if lv.get("is_confirmed_commercial_landing"):
+                flags.append("COMMERCIAL_LANDING")
+            if lv.get("ssrf_blocked"):
+                flags.append("SSRF_BLOCKED")
+            flag_str = f" [{', '.join(flags)}]" if flags else ""
+            print(
+                f"      • {lv.get('status')} ({lv.get('redirect_count', 0)} hops) -> "
+                f"{lv.get('final_url')}{flag_str}"
+            )
     print("-------------------------------------------------------")
     print("  TRAFFIC LIGHT (TripleEvidenceLock):")
     tl = res.get("traffic_light", {})
@@ -165,6 +197,7 @@ def cmd_audit_article(args: argparse.Namespace) -> int:
     print(f"  Total Fine Range      : {min_fine:,} - {max_fine:,} RUB{warning_suffix}")
     print("=======================================================\n")
     return 0
+
 
 
 # -----------------------------------------------------------------------------
@@ -260,12 +293,19 @@ def cmd_audit_site(args: argparse.Namespace) -> int:
     return 0
 
 
+
 # -----------------------------------------------------------------------------
 # COMMAND: hunt-vcru
 # -----------------------------------------------------------------------------
 def cmd_hunt_vcru(args: argparse.Namespace) -> int:
-    """Executes unified VC.ru harvest and advertiser site grouping."""
-    auditor = DualAuditor(bundle=get_champion_bundle())
+    """Executes unified VC.ru harvest, OutreachLedger cooldown check, and LeadPackager output."""
+    use_vega = bool(getattr(args, "vega_grey_zone", False) or os.environ.get("ADRADAR_VEGA_GREY_ZONE") == "1")
+    verify_links = bool(getattr(args, "verify_links", True)) and os.environ.get("ADRADAR_VERIFY_LINKS") != "0"
+    auditor = DualAuditor(
+        bundle=get_champion_bundle(),
+        enable_vega_grey_zone=use_vega,
+        enable_live_link_verifier=verify_links,
+    )
     limit = args.limit or 50
     out_dir = Path(args.output_dir) if args.output_dir else None
 
@@ -277,6 +317,10 @@ def cmd_hunt_vcru(args: argparse.Namespace) -> int:
     print("=======================================================")
     print(f"  Articles Scanned     : {res.get('total_articles_scanned')}")
     print(f"  Unique Advertisers   : {res.get('unique_advertisers_found')}")
+    print(f"  Skipped (Ledger 90d) : {res.get('skipped_by_ledger', 0)}")
+    print(f"  Packaged Leads (NEW) : {res.get('packaged_leads_count', 0)}")
+    if res.get("report_path"):
+        print(f"  Consolidated Report  : {res.get('report_path')}")
     reports = res.get("consolidated_company_reports", [])
     print(f"  Consolidated Reports : {len(reports)}")
     for r in reports[:5]:
@@ -284,7 +328,60 @@ def cmd_hunt_vcru(args: argparse.Namespace) -> int:
         art_count = r.get("related_articles_count")
         sa = r.get("site_audit", {})
         cp = sa.get("company_profile", {})
-        print(f"    • {dom} ({cp.get('legal_name')} | INN {cp.get('inn')}) : {art_count} linked articles")
+        st = r.get("ledger_status", "N/A")
+        print(f"    • {dom} ({cp.get('legal_name')} | INN {cp.get('inn')}) : {art_count} linked articles [Ledger: {st}]")
+    print("=======================================================\n")
+    return 0
+
+
+# -----------------------------------------------------------------------------
+# COMMAND: verify-leads
+# -----------------------------------------------------------------------------
+def cmd_verify_leads(args: argparse.Namespace) -> int:
+    """Runs automated Stage A (6-Point Proof Matrix) + Stage B (OpenRouter Defense Attorney) reality check."""
+    from legal_sheaf.reality_verifier import verify_hunt_leads_reality
+
+    raw_from_hunt = getattr(args, "from_hunt", None)
+    report_path = None if raw_from_hunt in (None, "__DEFAULT__") else Path(raw_from_hunt)
+    out_dir = Path(args.output_dir) if getattr(args, "output_dir", None) else None
+    with_skeptic = bool(getattr(args, "with_skeptic", True))
+    max_leads = int(getattr(args, "max_leads", 15) or 15)
+    with_visual_qc = bool(getattr(args, "with_visual_qc", False))
+    provider = str(getattr(args, "provider", "gemini") or "gemini")
+
+    print(
+        f"[*] Starting Automated Reality Verification (provider={provider}, skeptic={with_skeptic}, "
+        f"max_leads={max_leads}, visual_qc={with_visual_qc})..."
+    )
+    try:
+        res = asyncio.run(
+            verify_hunt_leads_reality(
+                report_path=report_path,
+                with_skeptic=with_skeptic,
+                max_leads=max_leads,
+                output_dir=out_dir,
+                with_visual_qc=with_visual_qc,
+                provider=provider,
+            )
+        )
+    except FileNotFoundError as exc:
+        print(f"[!] Error: {exc}", file=sys.stderr)
+        return 1
+
+    sm = res.get("summary") or {}
+    print("\n=======================================================")
+    print("         ADRADAR AUTOMATED REALITY VERIFICATION        ")
+    print("=======================================================")
+    print(f"  Source Report         : {res.get('source_report_path')}")
+    print(f"  Total Leads Checked   : {sm.get('total_leads_checked', 0)}")
+    print(f"  AUTO_APPROVED_HARD    : {sm.get('auto_approved_hard_fact', 0)}")
+    print(f"  NEEDS_HUMAN_CHECK     : {sm.get('needs_human_check', 0)}")
+    print(f"  AUTO_REJECTED_FP      : {sm.get('auto_rejected_fp', 0)}")
+    print(f"  JSON Report           : {res.get('report_json_path')}")
+    print(f"  HTML Report           : {res.get('report_html_path')}")
+    print(f"  Skeptic Feedback      : {res.get('feedback_jsonl_path')}")
+    for ld in (res.get("leads") or [])[:10]:
+        print(f"    • {ld.get('domain')} (INN {ld.get('inn') or 'N/A'}) -> {ld.get('final_verdict')} | {str(ld.get('consensus_reason') or '')[:90]}")
     print("=======================================================\n")
     return 0
 
@@ -343,11 +440,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
     host = args.host or "0.0.0.0"
     print(f"[*] Starting AdRadar Showcase Server on http://{host}:{port} ...")
 
-    from legal_sheaf.lead_packager import ShowcaseServer
     from aiohttp import web
 
-    server = ShowcaseServer()
-    app = server.create_app()
+    src_parent = str(Path(__file__).resolve().parents[1])
+    if src_parent not in sys.path:
+        sys.path.insert(0, src_parent)
+
+    from showcase_server import cleanup_expired_leads, create_app, load_runtime_env
+
+    load_runtime_env()
+    cleanup_expired_leads()
+    app = create_app()
     web.run_app(app, host=host, port=port)
     return 0
 
@@ -461,6 +564,7 @@ def cmd_ledger(args: argparse.Namespace) -> int:
     return 0
 
 
+
 # -----------------------------------------------------------------------------
 # COMMAND: doctor (with --live-canaries)
 # -----------------------------------------------------------------------------
@@ -486,23 +590,47 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if check["is_valid"]:
         print(f"  [OK] Champion Bundle v{bundle.version} SHA-256 Valid")
         print(f"       Statute Cutoff Date: {bundle.statute_cutoff_date}")
-        print(f"       Certified Precision: {bundle.certified_metrics.get('precision', 'N/A')}")
-        print(f"       Certified ECE      : {bundle.certified_metrics.get('ece', 'N/A')}")
+        synth_m = bundle.manifest.get("synthetic_eval_metrics") or bundle.certified_metrics
+        real_m = bundle.manifest.get("real_vcru_eval_metrics") or {}
+        grey_m = bundle.manifest.get("real_vcru_grey_eval_metrics") or {}
+        real_n = bundle.manifest.get("real_human_labeled_count", 0)
+        grey_n = grey_m.get("sample_count", 0)
+        print(f"       Architecture       : {bundle.manifest.get('architecture', 'LinkCentricAdClassifierV3')} ({bundle.manifest.get('feature_dim', 48)} features)")
+        print(f"       Statutory Anchors  : Precision={synth_m.get('precision', 'N/A')}, ECE={synth_m.get('ece', 'N/A')}, Brier={synth_m.get('brier_score', 'N/A')}")
+        print(f"       Real VC.ru (N={real_n})  : Precision={real_m.get('precision', 'N/A')}, Recall={real_m.get('recall', 'N/A')}, F1={real_m.get('f1', 'N/A')}, Acc={real_m.get('accuracy', 'N/A')}, ECE={real_m.get('ece', 'N/A')}")
+        if grey_m:
+            print(f"       Grey Zone (N={grey_n})   : Precision={grey_m.get('precision', 'N/A')}, Recall={grey_m.get('recall', 'N/A')}, F1={grey_m.get('f1', 'N/A')}, Acc={grey_m.get('accuracy', 'N/A')}")
     else:
         print(f"  [FAIL] Bundle checksum mismatch: {check['mismatches']}")
         all_passed = False
 
-    # 3. Check ONNX Runtime Engine
+    # 3. Check PyTorch Semantic Encoder + ONNX Runtime Engine (Honest Hardware Allocation)
+    import torch
     import onnxruntime as ort
+
+    cuda_avail = torch.cuda.is_available()
+    gpu_label = torch.cuda.get_device_name(0) if cuda_avail else "CPU"
+    feat_builder = getattr(bundle, "_feature_builder", None)
+    enc_active_dev = str(feat_builder.device).upper() if feat_builder is not None else ("CUDA" if cuda_avail else "CPU")
+    enc_model_name = bundle.manifest.get("encoder_model", "deepvk/USER2-base")
+    if feat_builder is not None and not feat_builder.use_fast_ngram_fallback and feat_builder.encoder is not None:
+        enc_status = f"{enc_active_dev} ({gpu_label})" if enc_active_dev.startswith("CUDA") else "CPU"
+    else:
+        enc_status = f"Fallback (n-gram 256, GPU={'CUDA/' + gpu_label if cuda_avail else 'CPU'})"
+    print(f"  [OK] PyTorch Semantic Encoder ({enc_model_name}): {enc_status}")
+
     providers = ort.get_available_providers()
-    print(f"  [OK] ONNX Runtime Available Providers: {providers}")
+    active_onnx_providers = bundle._onnx_session.get_providers() if getattr(bundle, "_onnx_session", None) else providers
+    onnx_kb = len(bundle.onnx_bytes) / 1024.0
+    feat_dim = bundle.manifest.get("feature_dim", 48)
+    print(f"  [OK] LinkCentricAdClassifierV3 ONNX Graph ({onnx_kb:.1f} KB, {feat_dim} features): {', '.join(active_onnx_providers)} (<0.1ms)")
 
     # 4. Feature Drift Check
-    np.random.seed(42)
-    baseline = np.random.uniform(0.2, 0.8, size=(100, 16))
+    rng_psi = np.random.default_rng(42)
+    baseline = rng_psi.uniform(0.0, 1.0, size=(100, int(feat_dim)))
     drift_check = calculate_psi(baseline, baseline)
     if not drift_check["has_drift"]:
-        print(f"  [OK] Feature Drift Detector (PSI Engine) Nominal (Max PSI: {drift_check['max_psi']})")
+        print(f"  [OK] Feature Drift Detector (PSI Engine, D={feat_dim}) Nominal (Max PSI: {drift_check['max_psi']})")
     else:
         print(f"  [WARN] Unexpected feature drift detected: {drift_check}")
 
@@ -548,7 +676,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             all_passed = False
 
         print("\n-------------------------------------------------------")
-        print("    DUAL GOLDEN CANARY CHECK (champion_v2.bundle)      ")
+        print("    DUAL GOLDEN CANARY CHECK (champion_v3.bundle)      ")
         print("-------------------------------------------------------")
         # Golden Article Check (EXTERNAL_PUBLICATION)
         doc_golden_art = DocumentInput(
@@ -658,6 +786,7 @@ def cmd_plan_horizon(args: argparse.Namespace) -> int:
     return 0
 
 
+
 def cmd_build_kit(args: argparse.Namespace) -> int:
     """
     Builds client turnkey remediation kit (14 900 RUB product).
@@ -705,6 +834,7 @@ def cmd_build_kit(args: argparse.Namespace) -> int:
     return 0
 
 
+
 def cmd_export_lawyer_doc(args: argparse.Namespace) -> int:
     from legal_sheaf.lawyer_dossier_exporter import LawyerDossierExporter
 
@@ -722,6 +852,7 @@ def cmd_export_lawyer_doc(args: argparse.Namespace) -> int:
     return 0
 
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="adradar",
@@ -733,6 +864,13 @@ def main() -> None:
     p_art = subparsers.add_parser("audit-article", help="Audit publication under 38-FZ (EXTERNAL_PUBLICATION)")
     p_art.add_argument("--url", type=str, required=True, help="Target URL of the article")
     p_art.add_argument("--text", type=str, help="Optional text content override")
+    p_art.add_argument("--vega-grey-zone", action="store_true", help="Enable Tier 2 Vega-U semantic judge on grey-zone ABSTAIN_REVIEW articles")
+    p_art.add_argument(
+        "--verify-links",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Verify redirects and destination landing pages via Anti-SSRF HTTP probes (default: enabled)",
+    )
 
     # audit-site
     p_site = subparsers.add_parser("audit-site", help="Multi-page audit of corporate website (OWN_WEBSITE)")
@@ -745,6 +883,33 @@ def main() -> None:
     p_hunt = subparsers.add_parser("hunt-vcru", help="Harvest and audit VC.ru articles with advertiser grouping")
     p_hunt.add_argument("--limit", type=int, default=50, help="Number of articles to harvest (default 50)")
     p_hunt.add_argument("--output-dir", type=str, help="Directory to save consolidated reports")
+    p_hunt.add_argument("--vega-grey-zone", action="store_true", help="Enable Tier 2 Vega-U semantic judge on grey-zone ABSTAIN_REVIEW articles")
+    p_hunt.add_argument(
+        "--verify-links",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Verify redirects and destination landing pages via Anti-SSRF HTTP probes (default: enabled)",
+    )
+
+    # verify-leads
+    p_verify = subparsers.add_parser("verify-leads", help="Run automated 2-stage Reality Verification (Stage A matrix + Stage B OpenRouter Defense Attorney)")
+    p_verify.add_argument("--from-hunt", nargs="?", const="__DEFAULT__", default=None, help="Optional path to hunt_vcru_consolidated_report.json")
+    p_verify.add_argument(
+        "--with-skeptic",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run Stage B 2-family OpenRouter Defense Attorney cross-examination (default: enabled)",
+    )
+    p_verify.add_argument("--max-leads", type=int, default=15, help="Maximum leads to verify from hunt report (default 15)")
+    p_verify.add_argument("--with-visual-qc", action="store_true", help="Also run Chromium + VLM visual QC batch on top leads")
+    p_verify.add_argument("--output-dir", type=str, help="Directory to save reality_verification_report.json and .html")
+    p_verify.add_argument(
+        "--provider",
+        type=str,
+        default="gemini",
+        choices=["gemini", "openrouter"],
+        help="LLM provider for Stage B Defense Attorney (default: gemini)",
+    )
 
     # scan (legacy)
     p_scan = subparsers.add_parser("scan", help="Audit website URL or text")
@@ -803,6 +968,8 @@ def main() -> None:
         sys.exit(cmd_audit_site(args))
     elif args.subcommand == "hunt-vcru":
         sys.exit(cmd_hunt_vcru(args))
+    elif args.subcommand == "verify-leads":
+        sys.exit(cmd_verify_leads(args))
     elif args.subcommand == "scan":
         sys.exit(cmd_scan(args))
     elif args.subcommand == "serve":

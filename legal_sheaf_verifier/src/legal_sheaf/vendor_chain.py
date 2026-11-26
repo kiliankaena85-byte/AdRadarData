@@ -34,7 +34,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from legal_sheaf.config import DB_DIR
-from legal_sheaf.forensics_v3 import extract_root_domain, query_ripe_geo_ip, resolve_host_ip_with_fallback
+from legal_sheaf.forensics_v3 import STATIC_CDNS, extract_root_domain, query_ripe_geo_ip, resolve_host_ip_with_fallback
 from legal_sheaf.inn_erid_validators import find_valid_inns_in_text, validate_inn_checksum
 from legal_sheaf.rkn_registry_checker import check_rkn_registry_async
 
@@ -85,12 +85,6 @@ KNOWN_INFRA_VENDORS: Dict[str, Dict[str, Any]] = {
     "tawk.to": {"brand": "Tawk.to", "entity": "Tawk.to Inc.", "inn": None, "is_foreign": True, "skip_hop": True},
     "crisp.chat": {"brand": "Crisp", "entity": "Crisp IM SARL", "inn": None, "is_foreign": True, "skip_hop": True},
     "clarity.ms": {"brand": "Microsoft Clarity", "entity": "Microsoft Corp.", "inn": None, "is_foreign": True, "skip_hop": True},
-}
-
-STATIC_CDNS: Set[str] = {
-    "jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
-    "fonts.googleapis.com", "fonts.gstatic.com", "ajax.googleapis.com",
-    "code.jquery.com", "cdn.tailwindcss.com", "bootstrapcdn.com"
 }
 
 

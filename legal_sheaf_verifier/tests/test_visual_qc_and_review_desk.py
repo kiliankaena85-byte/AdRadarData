@@ -15,22 +15,22 @@ from typing import Any, Dict
 import pytest
 import httpx
 
-from visual_qc.trigger_cropper import (
+from vlm_context_engine.trigger_cropper import (
     _slugify,
     extract_policy_methods_snippet,
     is_ssrf_dangerous_url,
 )
-from visual_qc.nemotron_verifier import (
+from vlm_context_engine.openrouter_gateway import (
     _parse_json_resilient,
     load_citation_whitelist,
     sanitize_model_citations,
     verify_visual_triggers,
     get_openrouter_api_key,
-    LiveCatalogResolver,
     CircuitBreaker,
-    ContextRuleReconciler,
 )
-from visual_qc.review_desk import (
+from vlm_context_engine.live_catalog import LiveCatalogResolver
+from vlm_context_engine.reconciler import ContextRuleReconciler
+from vlm_context_engine.review_desk import (
     map_finding_to_zone,
     build_commercial_proposal_text,
     generate_review_desk_html,
@@ -38,7 +38,7 @@ from visual_qc.review_desk import (
 
 
 def test_zero_forbidden_libraries_loaded_by_visual_qc():
-    """Ensure visual_qc does not load PIL, cv2, openai, or langchain into sys.modules."""
+    """Ensure vlm_context_engine does not load PIL, cv2, openai, or langchain into sys.modules."""
     forbidden = [
         "cv2",
         "PIL",
@@ -93,14 +93,14 @@ def test_resilient_json_parsing():
 
 def test_citation_whitelist_sanitization():
     """Verifies that unverified court cases are masked while verified ones remain."""
-    whitelist = load_citation_whitelist()
+    whitelist, allowed_koap = load_citation_whitelist()
     assert len(whitelist) > 0, "Whitelist must have entries"
 
     # Assume "А40-325054/2025" is in whitelist, and "А40-999999/2029" is fake/hallucinated
     sample_text = (
         "Согласно делу А40-325054/2025 все правомерно, но в деле 05-9999/422/2029 и А40-999999/2029 суд оштрафовал компанию."
     )
-    cleaned = sanitize_model_citations(sample_text, whitelist)
+    cleaned = sanitize_model_citations(sample_text, whitelist, allowed_koap)
 
     # Fake cases must be masked
     assert "05-9999/422/2029" not in cleaned
@@ -353,12 +353,12 @@ paid_zdr_tier:
         "nvidia/nemotron-3.5-super-vl:free": {
             "id": "nvidia/nemotron-3.5-super-vl:free",
             "pricing": {"prompt": "0", "completion": "0"},
-            "architecture": {"modality": "text+image->text"},
+            "architecture": {"input_modalities": ["text", "image"]},
         },
         "paid/sneaky-model:free": {
             "id": "paid/sneaky-model:free",
             "pricing": {"prompt": "0.002", "completion": "0.005"},
-            "architecture": {"modality": "text+image->text"},
+            "architecture": {"input_modalities": ["text", "image"]},
         },
     }
 
@@ -377,7 +377,7 @@ def test_circuit_breaker_and_tristate_unverified(tmp_path):
     """Verifies CircuitBreaker trips on 3 errors and verify_visual_triggers returns UNVERIFIED."""
     import asyncio
 
-    cb = CircuitBreaker(failure_threshold=3, cooldown_seconds=60.0)
+    cb = CircuitBreaker(failure_threshold=3, cooldown_seconds=60.0, db_path=tmp_path / "cb.sqlite")
     test_model = "test/failing-model"
 
     assert cb.is_available(test_model) is True
@@ -452,6 +452,8 @@ def test_context_rule_reconciler_prevents_gtag_and_rkn_override():
             "finding_id": "meta_disclaimer",
             "is_false_positive": True,
             "vlm_verdict": "FALSE_POSITIVE",
+            "element_visually_present": True,
+            "readability_grade": "CLEARLY_READABLE",
             "exact_visible_text": "* Деятельность Meta запрещена в РФ",
             "visual_evidence_ru": "Сноска присутствует в подвале",
         },
@@ -537,7 +539,7 @@ def test_review_desk_renders_final_url_and_language_badge(tmp_path):
 
     assert html_file.exists()
     content = html_file.read_text(encoding="utf-8")
-    assert "Целевой URL (Final URL)" in content
+    assert "Конечный URL (Capture)" in content
     assert "https://athenachat.ai/ru/" in content
     assert "Язык страницы" in content
     assert "RU (Русский)" in content

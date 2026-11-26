@@ -67,6 +67,7 @@ def test_vendor_dossier_sqlite_cache_roundtrip():
         "policy_url": "https://testvendor.ai/policy",
         "is_russian_entity": True,
         "hop_level": 1,
+        "is_verified_200": True,
     }
 
     save_vendor_dossier(sample_dossier)

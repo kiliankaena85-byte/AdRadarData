@@ -214,13 +214,16 @@ class VerificationReport(BaseModel):
     regime: LegalRegime
     regime_name: str
     regime_probabilities: Dict[str, float]
-    total_sheaf_energy: float
-    top_edge_conflicts: List[EdgeConflict]
-    active_slots: List[SlotDiagnostic]
+    total_sheaf_energy: float = 0.0
+    top_edge_conflicts: List[EdgeConflict] = Field(default_factory=list)
+    active_slots: List[SlotDiagnostic] = Field(default_factory=list)
+    top_feature_attributions: List[Dict[str, Any]] = Field(default_factory=list)
+    extracted_link_windows: List[str] = Field(default_factory=list)
+    classifier_architecture: str = Field(default="LinkCentricAdClassifierV3")
     legal_citations: List[str]
     mitigating_factors: List[str]
     procedural_risks: List[str]
-    fast_standalone_mode: bool
+    fast_standalone_mode: bool = False
     latency_ms: float = 0.0
     temporal_status: TemporalValidityStatus = Field(default=TemporalValidityStatus.IN_FORCE)
     temporal_notes: Optional[str] = None

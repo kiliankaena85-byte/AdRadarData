@@ -5,19 +5,19 @@
 > **Rule**: Before searching functions with grep/find, inspect exact line ranges in this document.
 
 ## `legal_sheaf_verifier/src/ingestion/factory_crawler.py`
-- `class CompanyProfile` (L63-L79)
-- `class SiteAuditResult` (L82-L88)
-- `class FactoryCrawler` (L91-L554) - Asynchronous Site-First Crawler with rate-limiting, in-memory transit auditing,
-  - `def __init__(self, concurrency, rate_limit_sec, dadata_api_key, scanner_152fz)` (L97)
-  - `def _get_base_domain(self, url)` (L111)
-  - `async def _wait_for_rate_limit(self, domain)` (L118)
-  - `async def _fetch_page(self, client, url)` (L125)
-  - `def _extract_clean_text(self, html)` (L141)
-  - `def _filter_corporate_emails(self, text, domain)` (L147)
-  - `async def enrich_via_dadata(self, inn)` (L162) - Query DaData Free API /findById/party to retrieve official legal status, OKVED, and director.
-  - `async def enrich_via_gir_bo(self, inn)` (L203) - Query State Information Resource of Accounting (Financial) Statements (ГИР БО ФНС)
-  - `def generate_technical_memo(self, company, report_152fz, foreign_lang_168)` (L251) - Generates factual, technical, sysadmin-oriented express memo for company management.
-  - `async def audit_site(self, target_url)` (L321) - Crawl main page + up to 4 key subpages, inspect compliance, enrich via DaData,
+- `class CompanyProfile` (L63-L80)
+- `class SiteAuditResult` (L83-L89)
+- `class FactoryCrawler` (L92-L555) - Asynchronous Site-First Crawler with rate-limiting, in-memory transit auditing,
+  - `def __init__(self, concurrency, rate_limit_sec, dadata_api_key, scanner_152fz)` (L98)
+  - `def _get_base_domain(self, url)` (L112)
+  - `async def _wait_for_rate_limit(self, domain)` (L119)
+  - `async def _fetch_page(self, client, url)` (L126)
+  - `def _extract_clean_text(self, html)` (L142)
+  - `def _filter_corporate_emails(self, text, domain)` (L148)
+  - `async def enrich_via_dadata(self, inn)` (L163) - Query DaData Free API /findById/party to retrieve official legal status, OKVED, and director.
+  - `async def enrich_via_gir_bo(self, inn)` (L204) - Query State Information Resource of Accounting (Financial) Statements (ГИР БО ФНС)
+  - `def generate_technical_memo(self, company, report_152fz, foreign_lang_168)` (L252) - Generates factual, technical, sysadmin-oriented express memo for company management.
+  - `async def audit_site(self, target_url)` (L322) - Crawl main page + up to 4 key subpages, inspect compliance, enrich via DaData,
 
 ## `legal_sheaf_verifier/src/legal_sheaf/batch_checkpoints.py`
 - `class BatchCheckpointStore` (L28-L176) - SQLite-backed store for batch execution checkpoints and idempotent resumption.
@@ -32,22 +32,24 @@
 - `def get_checkpoint_store()` (L183)
 
 ## `legal_sheaf_verifier/src/legal_sheaf/bundle.py`
-- `def compute_sha256_bytes(data)` (L34) - Computes SHA-256 hex digest for binary data.
-- `def compute_sha256_file(path)` (L39) - Computes SHA-256 hex digest for a file.
-- `class IntegrityError` (L48-L50) - Raised when bundle SHA-256 signature or internal checksum verification fails.
-- `class AdRadarBrainBundle` (L53-L324) - Single-file atomic deployment bundle for LegalSheafNet-16x41.
-  - `def __init__(self, onnx_bytes, calibration, precedents, precedent_embeddings, manifest)` (L59)
-  - `def _init_runtime(self)` (L81) - Initializes ONNX inference session and helper modules.
-  - `def version(self)` (L97)
-  - `def statute_cutoff_date(self)` (L101)
-  - `def decision_threshold(self)` (L105)
-  - `def certified_metrics(self)` (L109)
-  - `def predict_tensor(self, x)` (L112) - Runs ONNX Runtime inference on input feature tensor [B, 16, 41] or [B, 16, 36].
-  - `def verify_document(self, doc)` (L126) - End-to-end audit of a document through feature builder, ONNX sheaf network,
-  - `def verify_integrity(self)` (L152) - Verifies internal SHA-256 checksums of all bundled components against manifest.
-  - `def save(self, path)` (L179) - Saves bundle into a single atomic zip archive (.bundle).
-  - `def load(cls, path, verify_hash)` (L225) - Loads and initializes an AdRadarBrainBundle from a .bundle archive.
-  - `def create_from_artifacts(cls, artifacts_dir, kb_seed_dir, bundle_version, certified_metrics)` (L260) - Builds a fresh bundle from local project artifacts and legal KB seed.
+- `def compute_sha256_bytes(data)` (L39) - Computes SHA-256 hex digest for binary data.
+- `def compute_sha256_file(path)` (L44) - Computes SHA-256 hex digest for a file.
+- `class IntegrityError` (L53-L55) - Raised when bundle SHA-256 signature or internal checksum verification fails.
+- `class AdRadarBrainBundle` (L58-L387) - Single-file atomic deployment bundle for LinkCentricAdClassifierV3.
+  - `def __init__(self, onnx_bytes, calibration, precedents, precedent_embeddings, manifest, feature_schema)` (L64)
+  - `def _init_runtime(self)` (L91) - Initializes ONNX inference session, feature extractor, and decoupled reference index.
+  - `def version(self)` (L125)
+  - `def statute_cutoff_date(self)` (L129)
+  - `def decision_threshold(self)` (L133)
+  - `def abstain_lower(self)` (L137)
+  - `def abstain_upper(self)` (L141)
+  - `def certified_metrics(self)` (L145)
+  - `def predict_features(self, x)` (L148) - Runs ONNX Runtime inference on input feature matrix [B, 48] or [48].
+  - `def verify_document(self, doc)` (L161) - End-to-end audit:
+  - `def verify_integrity(self)` (L198) - Verifies internal SHA-256 checksums of all bundled components against manifest.
+  - `def save(self, path)` (L223) - Saves bundle into a single atomic zip archive (.bundle).
+  - `def load(cls, path, verify_hash)` (L265) - Loads and initializes an AdRadarBrainBundle from a .bundle archive.
+  - `def create_from_artifacts(cls, artifacts_dir, kb_seed_dir, bundle_version, certified_metrics, use_fast_ngram_fallback, encoder_device, manifest_extra)` (L302) - Builds a fresh v3 bundle from local project artifacts and legal KB reference seed.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/calibration.py`
 - `def compute_ece(probs, labels, num_bins)` (L20) - Compute Expected Calibration Error (ECE).
@@ -55,12 +57,12 @@
   - `def __init__(self)` (L49)
   - `def forward(self, logits)` (L53)
   - `def fit(self, logits, labels, lr, max_iter)` (L56) - Fit temperature parameter via NLL loss minimization.
-- `class ConformalCalibrator` (L71-L200) - Split-Conformal Predictor.
+- `class ConformalCalibrator` (L71-L208) - Split-Conformal Predictor.
   - `def __init__(self, target_precision, abstain_lower, abstain_upper)` (L78)
   - `def calibrate(self, raw_violation_logits, labels, delta)` (L91) - Calibrate temperature and search threshold for guaranteed target precision
-  - `def predict(self, raw_violation_logit)` (L159) - Returns:
-  - `def save(self, file_path)` (L179)
-  - `def load(self, file_path)` (L192)
+  - `def predict(self, raw_violation_logit)` (L167) - Returns:
+  - `def save(self, file_path)` (L187)
+  - `def load(self, file_path)` (L200)
 
 ## `legal_sheaf_verifier/src/legal_sheaf/chronotope.py`
 - `class TemporalDecision` (L135-L141) - Result of temporal validity analysis under Art. 1.7 & Art. 4.5 KoAP RF.
@@ -78,41 +80,48 @@
 - `def get_champion_bundle()` (L53) - Loads champion bundle if exists, or builds from artifacts.
 - `def check_stream_anomaly(items, min_threshold, max_threshold)` (L64) - Stream Anomaly Guard:
 - `def cmd_audit_article(args)` (L118) - Executes single-tier article audit in EXTERNAL_PUBLICATION mode.
-- `def cmd_audit_site(args)` (L173) - Executes multi-page site audit (up to 6 pages) in OWN_WEBSITE mode.
-- `def cmd_hunt_vcru(args)` (L266) - Executes unified VC.ru harvest and advertiser site grouping.
-- `def cmd_scan(args)` (L295) - Audit a URL, text fragment, or company domain.
-- `def cmd_serve(args)` (L340) - Launch showcase HTTP server.
-- `def cmd_learn(args)` (L358) - Execute Continual Learning cycle.
-- `def cmd_ledger(args)` (L409) - Manages cold outreach ledger (Anti-Spam & 90-day cooldown).
-- `def cmd_doctor(args)` (L467) - Comprehensive system diagnostic check including live canaries and drift guard.
-- `def cmd_plan_horizon(args)` (L622) - Executes evolutionary horizon planning for target domain.
-- `def cmd_build_kit(args)` (L661) - Builds client turnkey remediation kit (14 900 RUB product).
-- `def cmd_export_lawyer_doc(args)` (L708)
-- `def main()` (L725)
+- `def cmd_audit_site(args)` (L206) - Executes multi-page site audit (up to 6 pages) in OWN_WEBSITE mode.
+- `def cmd_hunt_vcru(args)` (L300) - Executes unified VC.ru harvest, OutreachLedger cooldown check, and LeadPackager output.
+- `def cmd_verify_leads(args)` (L340) - Runs automated Stage A (6-Point Proof Matrix) + Stage B (OpenRouter Defense Attorney) reality check.
+- `def cmd_scan(args)` (L392) - Audit a URL, text fragment, or company domain.
+- `def cmd_serve(args)` (L437) - Launch showcase HTTP server.
+- `def cmd_learn(args)` (L461) - Execute Continual Learning cycle.
+- `def cmd_ledger(args)` (L512) - Manages cold outreach ledger (Anti-Spam & 90-day cooldown).
+- `def cmd_doctor(args)` (L571) - Comprehensive system diagnostic check including live canaries and drift guard.
+- `def cmd_plan_horizon(args)` (L750) - Executes evolutionary horizon planning for target domain.
+- `def cmd_build_kit(args)` (L790) - Builds client turnkey remediation kit (14 900 RUB product).
+- `def cmd_export_lawyer_doc(args)` (L838)
+- `def main()` (L856)
 
 ## `legal_sheaf_verifier/src/legal_sheaf/continual_learner.py`
-- `def calculate_psi(baseline_matrix, current_matrix, num_bins, epsilon)` (L44) - Computes Population Stability Index (PSI) for each of the 16 slots.
-- `def ingest_kb_inbox(bundle, inbox_dir)` (L129) - Ingests new statutes, amendments, FAS letters, and court cases from inbox directory
-- `class PromotionDecision` (L217-L225)
-- `class ContinualLearner` (L228-L504) - Continual Learning Engine with Experience Replay, L2-SP Regularization,
-  - `def __init__(self, champion_bundle, lambda_sp, target_precision, max_ece)` (L234)
-  - `def _init_torch_model_from_checkpoint(self, checkpoint_path)` (L247) - Loads PyTorch model for training.
-  - `def evaluate_model_on_dataset(self, model, dataset, threshold)` (L263) - Evaluates precision, recall, and ECE for binary violation detection.
-  - `def train_challenger(self, golden_data, new_feedback, epochs, lr)` (L309) - Trains challenger using Experience Replay and L2-SP Regularization:
-  - `def run_champion_challenger_gate(self, golden_dataset, new_feedback, challenger_model, challenger_threshold, epochs)` (L389) - Executes full continual learning loop and gate:
+- `def calculate_psi(baseline_matrix, current_matrix, num_bins, epsilon)` (L40) - Computes Population Stability Index (PSI) across each feature/slot column.
+- `def ingest_kb_inbox(bundle, inbox_dir)` (L119) - Ingests new statutes, amendments, FAS letters, and court cases from inbox directory
+- `class PromotionDecision` (L209-L217)
+- `class ContinualLearner` (L220-L484) - Continual Learning Engine with Experience Replay, L2-SP Regularization,
+  - `def __init__(self, champion_bundle, lambda_sp, target_precision, max_ece)` (L226)
+  - `def _init_torch_model_from_checkpoint(self, checkpoint_path)` (L239) - Loads PyTorch LinkCentricAdClassifierV3 model for continual training.
+  - `def evaluate_model_on_dataset(self, model, dataset, threshold)` (L260) - Evaluates precision, recall, and ECE for binary violation detection.
+  - `def train_challenger(self, golden_data, new_feedback, epochs, lr)` (L306) - Trains challenger using Experience Replay and L2-SP Regularization:
+  - `def run_champion_challenger_gate(self, golden_dataset, new_feedback, challenger_model, challenger_threshold, epochs)` (L376) - Executes full continual learning loop and gate:
 
 ## `legal_sheaf_verifier/src/legal_sheaf/dual_auditor.py`
-- `def resolve_redirect_url(url)` (L128) - Resolves redirect parameters into clean target destination.
-- `def is_affiliate_link(url)` (L142) - Checks if link has referral or affiliate parameters.
-- `class DualAuditor` (L147-L1453) - Unified Dual-Tier Compliance Auditor for Articles and Corporate Websites.
-  - `def __init__(self, bundle, koap_calculator, scanner_152)` (L152)
-  - `async def audit_article(self, url, text, client)` (L175) - Audits an article or media publication under 38-FZ (EXTERNAL_PUBLICATION mode).
-  - `async def audit_site(self, domain, client, max_pages, deep, gear)` (L410) - Audits a company website using a 3-tier cascade:
-  - `async def harvest_vc_timeline(self, client, limit)` (L1279) - Harvests live publications from api.vc.ru timeline feeds.
-  - `async def hunt_vcru(self, limit, output_dir, client)` (L1358) - Unified hunt on VC.ru timeline.
-- `async def fast_surface_triage_l0(domain, client)` (L1456) - Gear 1 (L0 Fast Surface Triage — <= 0.25s per site, 1 GET of home page <= 256 KB, 0 external APIs).
-- `async def audit_domains_cascade(domains, deep, client, batch_id, resume)` (L1586) - Cascaded batch audit across domains (L0 -> L1 -> L2).
-- `async def run_cascaded_batch_audit(domains, gear, client)` (L1656) - High-speed cascaded batch audit for multiple domains.
+- `def resolve_redirect_url(url)` (L151) - Resolves redirect parameters into clean target destination.
+- `def is_affiliate_link(url)` (L165) - Checks if link has referral or affiliate parameters.
+- `def _extract_site_contacts_and_ceo(inspected_pages, clean_domain)` (L187) - Deterministically extracts corporate emails, Telegram handles, and director/IP FIO
+- `def _strip_markup(raw)` (L276) - Removes inline HTML highlight tags (e.g. from GIR BO responses) and trims whitespace.
+- `def _extract_own_company_inns(inspected_pages, clean_domain)` (L322) - Extracts the site owner's INN/OGRN/KIO with strict priority contacts -> oferta -> home -> policy,
+- `def _timestamp_to_iso_date(raw_val)` (L443) - Converts Unix timestamp or ISO-like string to YYYY-MM-DD.
+- `def _extract_vcru_block_captions_and_links(blocks)` (L469) - Extracts plain text, media/image captions, and resolved links from VC.ru JSON blocks.
+- `def _detect_own_corporate_blog(url, author, subsite, commercial_urls)` (L535) - Detects whether an article is published on the advertiser's own corporate blog (Part 2-3 Art. 2 38-FZ)
+- `class DualAuditor` (L595-L2664) - Unified Dual-Tier Compliance Auditor for Articles and Corporate Websites.
+  - `def __init__(self, bundle, koap_calculator, scanner_152, vega_sensor, enable_vega_grey_zone, enable_live_link_verifier)` (L600)
+  - `async def audit_article(self, url, text, client, raw_links, title_hint, author_hint, platform_ad_meta_hint, verify_links_live, link_probe_cache, published_at_hint, subsite_hint)` (L629) - Audits an article or media publication under 38-FZ (EXTERNAL_PUBLICATION mode).
+  - `async def audit_site(self, domain, client, max_pages, deep, gear)` (L1156) - Audits a company website using a 3-tier cascade:
+  - `async def harvest_vc_timeline(self, client, limit)` (L2172) - Harvests live publications from api.vc.ru timeline feeds.
+  - `async def hunt_vcru(self, limit, output_dir, client, ledger, packager)` (L2250) - Unified hunt on VC.ru timeline:
+- `async def fast_surface_triage_l0(domain, client)` (L2667) - Gear 1 (L0 Fast Surface Triage — <= 0.25s per site, 1 GET of home page <= 256 KB, 0 external APIs).
+- `async def audit_domains_cascade(domains, deep, client, batch_id, resume)` (L2797) - Cascaded batch audit across domains (L0 -> L1 -> L2).
+- `async def run_cascaded_batch_audit(domains, gear, client)` (L2867) - High-speed cascaded batch audit for multiple domains.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/enforcement_reality.py`
 - `class EnforcementTier` (L24-L27)
@@ -121,8 +130,8 @@
 - `class EvidenceLockViolation` (L66-L68) - Raised when an auditor attempts to claim RED or ORANGE penalty without valid evidence.
 - `class TripleEvidenceLock` (L71-L102) - Enforces strict zero-hallucination evidence invariant for regulatory findings.
   - `def verify_and_lock(signature, tier, witness, allow_downgrade_to_gray)` (L78) - Validates evidence witness for the finding.
-- `def classify_finding(signature, context_mode, witness, allow_downgrade)` (L343) - Classifies an audit finding into EnforcementTier and applies TripleEvidenceLock.
-- `def split_findings_by_traffic_light(findings)` (L401) - Separates list of findings into RED_REAL_FINE, ORANGE_REGULATORY_DEMAND, and GRAY_HYGIENE_BONUS.
+- `def classify_finding(signature, context_mode, witness, allow_downgrade)` (L409) - Classifies an audit finding into EnforcementTier and applies TripleEvidenceLock.
+- `def split_findings_by_traffic_light(findings)` (L467) - Separates list of findings into RED_REAL_FINE, ORANGE_REGULATORY_DEMAND, and GRAY_HYGIENE_BONUS.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/evolutionary_horizon.py`
 - `class OptimalHorizonSolver` (L43-L99) - Analytically computes optimal forecast steps H* in [5 .. 100].
@@ -141,57 +150,69 @@
 - `def plan_evolutionary_horizon(domain, uncertainty, base_fine, seed)` (L358) - High-level entry point for horizon planning.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/explainer.py`
-- `class LegalSheafExplainer` (L122-L449) - Translates model outputs into clear legal audit conclusions.
-  - `def __init__(self, precedent_index)` (L125)
-  - `def explain(self, doc, model_output, conformal_threshold, latency_ms)` (L128) - Generate detailed, verifiable legal report.
-  - `def _filter_verified_citations(self, citations)` (L414) - Guarantees that visible legal citations contain ONLY 100% verified RF legal acts.
-  - `def _sanitize_text_list(self, items)` (L435) - Strips any unverified court case numbers from textual diagnostic lists.
+- `def _to_numpy(val)` (L69)
+- `def _load_unverified_case_numbers_from_seed()` (L77)
+- `class LegalSheafExplainer` (L94-L561) - Translates model outputs and statutory checks into verifiable legal audit conclusions.
+  - `def __init__(self, precedent_index)` (L97)
+  - `def _get_unverified_case_numbers(self)` (L103)
+  - `def explain(self, doc, model_output, conformal_threshold, latency_ms, temperature, abstain_lower, abstain_upper, feature_values, link_windows, tier0_flags)` (L114) - Generates detailed, verifiable legal report from v3 model outputs and statutory guards.
+  - `def _filter_verified_citations(self, citations)` (L553) - Guarantees that visible legal citations contain ONLY 100% verified RF legal acts.
+  - `def _sanitize_text_list(self, items)` (L558) - Strips any unverified court case numbers from textual diagnostic lists.
 
-## `legal_sheaf_verifier/src/legal_sheaf/feature_builder.py`
-- `class SlotCrossAttentionPooler` (L38-L81) - Lightweight trainable cross-attention pooler.
-  - `def __init__(self, num_slots, hidden_dim, out_dim)` (L45)
-  - `def forward(self, text_embeds)` (L60) - text_embeds: [Batch, SeqLen, hidden_dim] or [Batch, hidden_dim]
-- `class SlotFeatureBuilder` (L144-L416) - Builds the complete state tensor of shape (Batch, 16, 36) for LegalSheafNet.
-  - `def __init__(self, precedent_index, device, use_fast_ngram_fallback)` (L152)
-  - `def _extract_dom_elements(self, raw_html)` (L166) - Parse HTML and return list of (text_content, tag_name, salience_weight).
-  - `def _compute_gini(self, counts)` (L207) - Compute Gini concentration index of counts across paragraphs.
-  - `def build_document_tensor(self, doc)` (L219) - Build (16, 36) tensor for a single document.
-  - `def build_batch_tensor(self, docs)` (L411) - Build (Batch, 16, 36) tensor for a batch of documents.
+## `legal_sheaf_verifier/src/legal_sheaf/factual_verifiers.py`
+- `def _extract_url_erid_raw(url)` (L103) - Extracts the raw erid query parameter from a URL (even if format is invalid).
+- `def _extract_text_only_erids(text, platform_ad_meta)` (L113) - Extracts valid erid tokens explicitly declared in body text or platform metadata (not URL params).
+- `def _link_advertiser_key(url)` (L145) - Computes an advertiser/campaign grouping key for a commercial link.
+- `def _is_plain_author_messenger_link(url)` (L180) - Returns True for plain messenger/social channel links without bot/ref/start/erid markers.
+- `def _brand_near_text_erid(body_text, adv_key)` (L198) - Checks whether the advertiser's domain stem appears within +/-250 chars of an explicit text erid.
+- `def verify_per_link_erid_coverage(text, commercial_urls, raw_links, page_url, platform_ad_meta, extra_url_erids)` (L215) - Verifies erid token coverage for EVERY commercial/affiliate URL in an article.
+- `def analyze_landing_page_html(html, final_url)` (L417) - Pure, deterministic HTML analyzer for a resolved landing page.
+- `def _ssrf_blocked_result(orig_url, final_url, hops, reason, started_at)` (L520)
+- `async def verify_link_redirect_and_landing(url, client, article_url, timeout, max_hops)` (L542) - Safely follows HTTP redirects via `safe_fetch_with_redirects` (Anti-SSRF),
+- `async def verify_article_links_live(urls, client, article_url, max_links, timeout, probe_cache)` (L676) - Concurrently verifies up to `max_links` commercial URLs (prioritizing shorteners first,
 
 ## `legal_sheaf_verifier/src/legal_sheaf/forensics_v3.py`
 - `class TriState` (L44-L48) - Three-valued logic under Kleene semantics: TRUE | FALSE | UNVERIFIED.
-- `def extract_root_domain(domain)` (L75) - Extracts second-level domain name (e.g. 'c3.ru' from 'c3.c3.ru' or 'athenachat.ai' from 'ru.athenachat.ai').
-- `async def resolve_host_ip_with_fallback(host, client)` (L90) - Resolves IP addresses for host, using DoH fallback if local resolver returns RFC2544 benchmark/sandbox IPs.
-- `async def query_ripe_geo_ip(ip, client)` (L132) - Queries RIPE NCC MaxMind GeoLite API with /24 subnet caching.
-- `async def discover_perimeter_hosts(domain, full_raw_html, policy_html, oferta_html, client)` (L202) - Discovers active perimeter hosts:
-- `async def inspect_infrastructure_geo_and_mx(hosts, client)` (L307) - 1. Resolves A-records of main site and discovered subdomains.
-- `async def inspect_external_js_endpoints(subdomains_html, client)` (L417) - Downloads external JS scripts (<= 512 KB) across discovered perimeter hosts,
-- `def meta_extremist_vs_blocked_rule(full_raw_html)` (L518) - Evaluates social networks in full raw HTML:
-- `def policy_and_terms_forensics(audited_domain, policy_html, oferta_html, site_html, policy_text, active_inn, **kwargs)` (L573) - Forensic defect detectors for Privacy Policy and B2C Terms of Service (Oferta):
-- `def detect_missing_seller_requisites(main_html, contacts_html, found_inns, found_ogrns)` (L691) - ст. 9 ЗоЗПП, п. 19 ПП РФ № 2463 -> ч. 1 ст. 14.8 КоАП РФ.
-- `async def resolve_phoenix_clones_in_fns(org_names, city_hint, client)` (L721) - Searches bo.nalog.gov.ru for organization names to detect 'Phoenix Clones':
-- `async def detect_regalia_and_pdf_chronology_mismatch(active_ogrn, html_text, pdf_urls, liquidated_inn, client)` (L813) - ч. 2 ст. 14.7 КоАП РФ, п. 2, 3 ч. 3 ст. 5 38-ФЗ.
-- `def detect_instant_protocol_triggers(html_texts)` (L892) - 1. Evaluates Meta extremist social links/icons vs blocked LinkedIn/X rule.
+- `def extract_root_domain(domain)` (L76) - Extracts second-level domain name (e.g. 'c3.ru' from 'c3.c3.ru' or 'athenachat.ai' from 'ru.athenachat.ai').
+- `async def resolve_host_ip_with_fallback(host, client)` (L94) - Resolves IP addresses for host, using DoH fallback if local resolver returns RFC2544 benchmark/sandbox IPs.
+- `async def query_ripe_geo_ip(ip, client)` (L136) - Queries RIPE NCC MaxMind GeoLite API with /24 subnet caching.
+- `async def discover_perimeter_hosts(domain, full_raw_html, policy_html, oferta_html, client)` (L206) - Discovers active perimeter hosts:
+- `async def inspect_infrastructure_geo_and_mx(hosts, client)` (L311) - 1. Resolves A-records of main site and discovered subdomains.
+- `async def inspect_external_js_endpoints(subdomains_html, client)` (L421) - Downloads external JS scripts (<= 512 KB) across discovered perimeter hosts,
+- `def _strip_html_tags(raw)` (L536) - Strips HTML markup tags and collapses excess whitespace.
+- `def _html_to_plain_text(raw)` (L544) - Converts HTML payload into normalized plain text while preserving non-HTML strings.
+- `def _extract_quote_snippet(text, start, end, radius)` (L553) - Extracts a compact plain-text window around [start:end] for witness evidence.
+- `def meta_extremist_vs_blocked_rule(full_raw_html)` (L569) - Evaluates social networks in full raw HTML:
+- `def policy_and_terms_forensics(audited_domain, policy_html, oferta_html, site_html, policy_text, active_inn, **kwargs)` (L641) - Forensic defect detectors for Privacy Policy and B2C Terms of Service (Oferta):
+- `def detect_missing_seller_requisites(main_html, contacts_html, found_inns, found_ogrns)` (L815) - ст. 9 ЗоЗПП, п. 19 ПП РФ № 2463 -> ч. 1 ст. 14.8 КоАП РФ.
+- `async def resolve_phoenix_clones_in_fns(org_names, city_hint, client, site_inns)` (L845) - Searches bo.nalog.gov.ru for organization names to detect 'Phoenix Clones':
+- `async def detect_regalia_and_pdf_chronology_mismatch(active_ogrn, html_text, pdf_urls, liquidated_inn, client)` (L976) - ч. 2 ст. 14.7 КоАП РФ, п. 2, 3 ч. 3 ст. 5 38-ФЗ.
+- `def detect_instant_protocol_triggers(html_texts)` (L1091) - 1. Evaluates Meta extremist social links/icons vs blocked LinkedIn/X rule.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/inn_erid_validators.py`
-- `def validate_inn_checksum(inn_str)` (L23) - Validate Russian Taxpayer Identification Number (ИНН) by FNS checksum algorithm.
-- `def validate_ogrn_checksum(ogrn_str)` (L47) - Validate Russian Primary State Registration Number (ОГРН / ОГРНИП).
-- `def find_valid_inns_in_text(text)` (L70) - Extract all candidate 10 or 12 digit numbers and return those with valid FNS checksums.
-- `def find_valid_ogrns_in_text(text)` (L84) - Extract and validate 13 or 15 digit OGRN/OGRNIP numbers.
-- `def validate_erid_token_format(token)` (L108) - Check if a candidate erid string matches ORD token format.
-- `def extract_erid_tokens(text, page_url, platform_ad_meta)` (L125) - Deterministically extract erid tokens from:
-- `def analyze_ad_label_status(text)` (L202) - Verify whether the mandatory literal word «Реклама» is present,
-- `def detect_untranslated_foreign_words_168fz(text)` (L249) - Detect untranslated foreign words in promotional context under 168-FZ and 38-FZ Art. 5(5).
+- `def validate_inn_checksum(inn_str)` (L32) - Validate Russian Taxpayer Identification Number (ИНН) by FNS checksum algorithm.
+- `def validate_ogrn_checksum(ogrn_str)` (L56) - Validate Russian Primary State Registration Number (ОГРН / ОГРНИП).
+- `def find_valid_inns_in_text(text)` (L79) - Extract all candidate 10 or 12 digit numbers and return those with valid FNS checksums.
+- `def find_valid_ogrns_in_text(text)` (L93) - Extract and validate 13 or 15 digit OGRN/OGRNIP numbers.
+- `def validate_erid_token_format(token)` (L117) - Check if a candidate erid string matches ORD token format.
+- `def extract_erid_tokens(text, page_url, platform_ad_meta)` (L138) - Deterministically extract erid tokens from:
+- `def analyze_ad_label_status(text)` (L220) - Verify whether a genuine 38-FZ advertising label ('#реклама', 'Реклама.',
+- `def is_editorial_crypto_news_url(url)` (L305) - Returns True when URL points to an editorial/news/blog/help path rather than exchange onboarding.
+- `def has_custom_campaign_or_service_path(url)` (L316) - Returns True when URL carries custom campaign query keys or explicit commercial product/service paths.
+- `def _is_host_in_set(host, domain_set)` (L323) - Matches exact domain or any subdomain (e.g. ru.wikipedia.org -> wikipedia.org).
+- `def has_explicit_commercial_tracking(url, page_url)` (L341) - Returns True for unambiguous affiliate/referral links, or external non-neutral URLs
+- `def extract_commercial_targets(text, raw_links, extra_exclude_hosts, page_url)` (L391) - Extracts explicit AND hidden commercial channels/contacts from text and links:
+- `def detect_untranslated_foreign_words_168fz(text)` (L547) - Detect untranslated foreign words in promotional context under 168-FZ and 38-FZ Art. 5(5).
 
 ## `legal_sheaf_verifier/src/legal_sheaf/it_accreditation.py`
 - `class ITAccreditationAuditor` (L32-L96) - Audits accredited IT company website compliance under Mintsifry Order No. 511.
   - `def audit_it_company_website(html, expected_inn, qualifying_okveds)` (L36)
 
 ## `legal_sheaf_verifier/src/legal_sheaf/koap_calculator.py`
-- `class KoAPSanctionsCalculator` (L193-L421) - Calculator for administrative liabilities under KoAP RF.
-  - `def __init__(self, config_path)` (L199)
-  - `def map_violation_to_article(self, violation)` (L227) - Resolves signature or infraction string to KoAP RF article key.
-  - `def calculate_penalties(self, violations, is_sme, first_offense, is_ip)` (L249) - Calculates sanctions under KoAP RF with grouping, 248-FZ barrier, and SME relief.
+- `class KoAPSanctionsCalculator` (L201-L437) - Calculator for administrative liabilities under KoAP RF.
+  - `def __init__(self, config_path)` (L207)
+  - `def map_violation_to_article(self, violation)` (L235) - Resolves signature or infraction string to KoAP RF article key.
+  - `def calculate_penalties(self, violations, is_sme, first_offense, is_ip)` (L265) - Calculates sanctions under KoAP RF with grouping, 248-FZ barrier, and SME relief.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/lawyer_dossier_exporter.py`
 - `def extract_body_content(html_str)` (L40) - Extracts the <body> content and strips out <style>...</style>.
@@ -211,21 +232,46 @@
   - `def export_all(self)` (L992) - Generates and writes both HTML and Markdown dossiers.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/lead_packager.py`
-- `def parse_russian_name(raw_name)` (L32) - Parses a Russian name string into (surname, first_name, patronymic).
-- `def inflect_dative_genitive(first_name, patronymic)` (L65) - Inflects Name + Patronymic into Genitive/Dative ("для <кого?>") for routing.
-- `def build_human_salutation(management_name, corporate_emails)` (L98) - Builds natural, personified Russian salutation according to professional etiquette.
-- `def get_human_regime_description(regime_name)` (L129) - Translates internal ML regime enums into natural business Russian.
-- `class LeadPackager` (L142-L783) - Builds client-ready, elegant, linter-styled HTML reports and high-conversion B2B outreach drafts.
-  - `def __init__(self, output_root)` (L147)
-  - `def package_lead(self, company, site_audit, sheaf_report, post_url, post_title, target_link, author_domain)` (L152) - Creates <slug>/index.html and <slug>/outreach_draft.txt with cryptosecure secret token.
-  - `def _record_manifest(self, secret_slug, slug, company, html_path)` (L279) - Stores token-to-file mapping for showcase server.
-  - `def _render_outreach_draft(self, template_type, company, post_url, post_title, target_link, sheaf_report, high_152_violations, showcase_url, koap_calc)` (L312)
-  - `def _render_html_report(self, company, site_audit, sheaf_report, post_url, post_title, target_link, region_code, region_title, ufas_name, circuit_code, circuit_desc, high_152_violations, koap_calc)` (L449)
+- `def parse_russian_name(raw_name)` (L33) - Parses a Russian name string into (surname, first_name, patronymic).
+- `def inflect_dative_genitive(first_name, patronymic)` (L66) - Inflects Name + Patronymic into Genitive/Dative ("для <кого?>") for routing.
+- `def build_human_salutation(management_name, corporate_emails)` (L99) - Builds natural, personified Russian salutation according to professional etiquette.
+- `def get_human_regime_description(regime_name)` (L130) - Translates internal ML regime enums into natural business Russian.
+- `def _format_regime_title_ru(regime_name)` (L144) - Translates internal regime enum into clean Russian label for client HTML.
+- `def _format_koap_article_ru(art_key)` (L161) - Formats internal KoAP article keys into clean Russian statutory citations.
+- `def _describe_site_violation(v)` (L220) - Maps a technical site violation to clean human-readable Russian text,
+- `class LeadPackager` (L283-L1032) - Builds client-ready, elegant, linter-styled HTML reports and high-conversion B2B outreach drafts.
+  - `def __init__(self, output_root)` (L288)
+  - `def package_lead(self, company, site_audit, sheaf_report, post_url, post_title, target_link, author_domain)` (L293) - Creates <slug>/index.html and <slug>/outreach_draft.txt with cryptosecure secret token.
+  - `def _record_manifest(self, secret_slug, slug, company, html_path)` (L448) - Stores token-to-file mapping for showcase server.
+  - `def _render_outreach_draft(self, template_type, company, post_url, post_title, target_link, sheaf_report, high_152_violations, showcase_url, koap_calc, is_external_author, link_kind)` (L481)
+  - `def _render_html_report(self, company, site_audit, sheaf_report, post_url, post_title, target_link, region_code, region_title, ufas_name, circuit_code, circuit_desc, high_152_violations, koap_calc)` (L683)
 
-## `legal_sheaf_verifier/src/legal_sheaf/losses.py`
-- `class MultiTaskSheafLoss` (L18-L108) - Complete multi-task loss function for training LegalSheafNet-16x41.
-  - `def __init__(self, focal_gamma, focal_alpha, lambda_regime, lambda_slot_aux, lambda_energy_contrastive, lambda_stiefel_orth, energy_margin)` (L23)
-  - `def forward(self, preds, targets, stiefel_orth_loss)` (L44) - preds: model forward outputs
+## `legal_sheaf_verifier/src/legal_sheaf/link_classifier.py`
+- `class LinkCentricAdClassifierV3` (L25-L96) - Compact ~5.7K-parameter residual classifier over 48 Link-Centric features.
+  - `def __init__(self, in_dim, hidden_dim, bottleneck_dim, num_regimes)` (L31)
+  - `def set_normalization(self, mean, std)` (L61) - Stores training feature mean and std inside model buffers for ONNX parity.
+  - `def forward(self, x)` (L69) - x: [Batch, 48] float32 feature tensor.
+- `class LinkClassifierLoss` (L99-L153) - Sample-weighted multi-task loss combining Focal BCE (binary violation)
+  - `def __init__(self, focal_gamma, focal_alpha, lambda_regime, label_smoothing)` (L105)
+  - `def forward(self, preds, targets, sample_weights)` (L118)
+
+## `legal_sheaf_verifier/src/legal_sheaf/link_features.py`
+- `def get_shared_user2_encoder(device_str)` (L195) - Loads and caches deepvk/USER2-base SentenceTransformer once per (model, device).
+- `def compute_ngram_hash_vector(text, dim)` (L212) - Deterministic subword n-gram hash fallback (< 0.05 ms) via zlib.crc32.
+- `def resolve_is_own_website(doc)` (L237) - Resolves OWN_WEBSITE vs EXTERNAL_PUBLICATION without granting UGC platforms own-site immunity.
+- `def strip_links_footer(text)` (L256) - Strips synthetic '\n[Ссылки: ...]' tail appended by crawler to recover body prose.
+- `def _extract_target_search_keys(target)` (L261)
+- `def extract_link_context_windows(text, targets, window_radius)` (L293) - Extracts focused context windows around commercial links/anchors plus article lead & tail.
+- `def detect_banned_or_special_context(text, extracted_targets, is_own_website)` (L369) - Detects genuine Part 11 Art. 7 38-FZ crypto promotion (including crypto-exchanger catalogs),
+- `def _compute_brand_distribution(body_text, extracted_targets)` (L437) - Counts unique domains/brands and computes top-brand mention share in [0, 1].
+- `class LinkCentricFeatureExtractor` (L475-L750) - Extracts clean 48-dim Link-Centric feature vectors for LinkCentricAdClassifierV3
+  - `def __init__(self, device, use_fast_ngram_fallback)` (L481)
+  - `def _get_prototype_matrix(self)` (L498)
+  - `def _encode_pairs(self, texts)` (L516)
+  - `def _compute_deterministic_part(self, doc)` (L533)
+  - `def extract_with_diagnostics(self, doc)` (L702) - Builds the (48,) feature vector and returns full diagnostic metadata.
+  - `def build_feature_vector(self, doc)` (L722) - Build [48] float32 feature tensor for a single document.
+  - `def build_batch_features(self, docs)` (L727) - Build [Batch, 48] float32 feature tensor using batched GPU encoder calls.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/net_safety.py`
 - `class SSRFBlockedError` (L40-L42) - Raised when an outbound request or redirect attempts to reach prohibited network infrastructure.
@@ -235,10 +281,10 @@
 - `async def safe_fetch_with_redirects(client, url, max_hops, timeout, headers, method, max_redirects)` (L136) - Executes HTTP request with strict manual redirect following and Anti-SSRF verification before EVERY hop.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/onnx_runtime.py`
-- `def export_sheaf_to_onnx(model, output_path, opset_version, device)` (L25) - Export LegalSheafNet16x41 to ONNX with dynamic batch dimension.
-- `class ONNXLegalSheafVerifier` (L92-L139) - Production ONNXRuntime session wrapper.
-  - `def __init__(self, onnx_model_path, prefer_cuda)` (L98)
-  - `def predict(self, state_tensor)` (L120) - state_tensor: np.ndarray of shape (Batch, 16, 36) in float32.
+- `def export_link_classifier_to_onnx(model, output_path, opset_version, device)` (L19) - Export LinkCentricAdClassifierV3 to ONNX with dynamic batch dimension.
+- `class ONNXLinkClassifierVerifier` (L78-L122) - Production ONNXRuntime session wrapper.
+  - `def __init__(self, onnx_model_path, prefer_cuda)` (L84)
+  - `def predict(self, features)` (L106) - features: np.ndarray of shape (Batch, 48) or (48,) in float32.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/outreach_ledger.py`
 - `def _clean_domain(domain)` (L34) - Normalizes domain name for ledger keying.
@@ -253,19 +299,49 @@
   - `def list_ledger(self, status, limit)` (L257) - Lists ledger entries, optionally filtered by status.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/precedent_index.py`
-- `class LegalPrecedentIndex` (L31-L410) - Vector search index and legal feature builder for parameters [20..35].
-  - `def __init__(self, seed_dir, device, use_fast_ngram_fallback, offline_ngram_mode)` (L39)
-  - `def offline_ngram_mode(self)` (L84)
-  - `def offline_ngram_mode(self, val)` (L88)
-  - `def embeddings(self)` (L93) - Alias for torch_precedent_matrix.
-  - `def embeddings(self, val)` (L98)
-  - `def _load_seed_corpus(self)` (L102) - Load JSONL corpus files.
-  - `def _compute_ngram_hash_vector(self, text, dim)` (L155) - Deterministic, ultrafast subword n-gram hash embedding (< 0.05 ms).
-  - `def _build_vector_index(self)` (L183) - Precompute embeddings for all precedents in corpus.
-  - `def _calculate_recency(self, date_str)` (L207) - Calculate exp(-months_age / 24.0) relative to reference date.
-  - `def match_slot_precedents(self, slot_text, slot_id, precomputed_vec, target_inn)` (L219) - Compute the 16 parameters [20..35] for a given slot.
-  - `def compute_all_slots_block_c(self, slot_texts, target_inn)` (L350) - Compute Block C features (16 slots x 16 parameters) -> np.ndarray of shape [16, 16].
-  - `def check_regional_divergence(self, slot_text, target_inn, slot_id)` (L384) - Calculates local circuit margin vs federal/Moscow benchmark margin.
+- `def _get_shared_user2_encoder(device_str)` (L35) - Loads and caches deepvk/USER2-base SentenceTransformer once per (model, device).
+- `class LegalPrecedentIndex` (L40-L421) - Vector search index and legal feature builder for parameters [20..35].
+  - `def __init__(self, seed_dir, device, use_fast_ngram_fallback, offline_ngram_mode, skip_index_build)` (L48)
+  - `def offline_ngram_mode(self)` (L94)
+  - `def offline_ngram_mode(self, val)` (L98)
+  - `def embeddings(self)` (L103) - Alias for torch_precedent_matrix.
+  - `def embeddings(self, val)` (L108)
+  - `def _load_seed_corpus(self)` (L112) - Load JSONL corpus files.
+  - `def _compute_ngram_hash_vector(self, text, dim)` (L165) - Deterministic, ultrafast subword n-gram hash embedding (< 0.05 ms).
+  - `def _build_vector_index(self)` (L194) - Precompute embeddings for all precedents in corpus.
+  - `def _calculate_recency(self, date_str)` (L218) - Calculate exp(-months_age / 24.0) relative to reference date.
+  - `def match_slot_precedents(self, slot_text, slot_id, precomputed_vec, target_inn)` (L230) - Compute the 16 parameters [20..35] for a given slot.
+  - `def compute_all_slots_block_c(self, slot_texts, target_inn)` (L361) - Compute Block C features (16 slots x 16 parameters) -> np.ndarray of shape [16, 16].
+  - `def check_regional_divergence(self, slot_text, target_inn, slot_id)` (L395) - Calculates local circuit margin vs federal/Moscow benchmark margin.
+
+## `legal_sheaf_verifier/src/legal_sheaf/reality_verifier.py`
+- `def _active_data_dir()` (L89)
+- `def _resolve_repo_root()` (L96) - Locates the repository root safely whether running from checkout or .venv site-packages.
+- `def _ensure_vlm_import_path()` (L110)
+- `def _load_openrouter_models_config()` (L116)
+- `def _get_openrouter_keys()` (L137)
+- `def _load_gemini_models_config()` (L181)
+- `def _get_gemini_api_keys()` (L202)
+- `def _extract_gemini_text(payload)` (L246) - Extracts non-thought text parts from Google Gemini generateContent response.
+- `def _load_whitelist()` (L269)
+- `def _sanitize_text_safe(text, allowed_citations, allowed_koap)` (L301)
+- `def _extract_json_safe(raw_response)` (L331)
+- `def _witness_is_intact(finding)` (L352)
+- `def _extract_koap_base(koap_str)` (L365)
+- `def _is_article_expired(article)` (L370)
+- `def _has_hard_article_evidence(article)` (L386)
+- `def evaluate_lead_proof_matrix(company_report)` (L425) - Deterministically audits a single consolidated advertiser report across 6 legal proof criteria (C1..C6)
+- `def _get_skeptic_model_families(cfg)` (L764)
+- `def _build_anonymized_skeptic_payload(company_report, proof_matrix)` (L792)
+- `def _normalize_skeptic_verdict(raw_val)` (L837)
+- `def _get_gemini_skeptic_families(cfg)` (L848)
+- `def _parse_skeptic_json_and_build_result(fam_id, model_id, raw_content, allowed_citations, allowed_koap)` (L869)
+- `async def _invoke_single_gemini_skeptic_family(family, system_prompt, user_prompt, api_keys, allowed_citations, allowed_koap, client, key_offset)` (L912)
+- `async def _invoke_single_skeptic_family(family, system_prompt, user_prompt, api_keys, allowed_citations, allowed_koap, client, key_offset)` (L976)
+- `async def run_adversarial_skeptic_for_lead(company_report, proof_matrix, client, api_keys, models_config, provider)` (L1044) - Runs 2 orthogonal LLM families acting as Defense Attorneys for the audited business
+- `def compute_final_consensus(proof_matrix, skeptic_res)` (L1151) - Combines deterministic Stage A proof matrix with Stage B 2-family skeptic verdicts.
+- `def render_reality_verification_html(report)` (L1203) - Renders a strictly self-contained zero-CDN HTML report of verified hunt leads.
+- `async def verify_hunt_leads_reality(report_path, with_skeptic, max_leads, output_dir, with_visual_qc, skeptic_client, api_keys, provider)` (L1314) - Runs end-to-end Stage A + Stage B verification over `hunt_vcru_consolidated_report.json`.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/registry_cache.py`
 - `def _get_async_lock(host)` (L51)
@@ -316,11 +392,11 @@
 - `class Violation152FZ` (L15-L24)
 - `class FormInspectionResult` (L27-L37)
 - `class Report152FZ` (L40-L48)
-- `class Compliance152FZScanner` (L151-L562) - Automated DOM & Static Inspector for 152-FZ personal data & cross-border compliance.
-  - `def __init__(self)` (L156)
-  - `def _strip_comments_preserving_lines(self, html)` (L159) - Replaces HTML comments <!-- ... --> with equivalent newlines.
-  - `def inspect_gtm_container_content(gtm_content)` (L172) - Deep-inspects GTM container body.
-  - `def scan_html(self, raw_html, page_url, policy_text, gtm_containers, site_has_valid_privacy_policy)` (L198) - Runs comprehensive 152-FZ compliance audit on raw HTML payload.
+- `class Compliance152FZScanner` (L181-L642) - Automated DOM & Static Inspector for 152-FZ personal data & cross-border compliance.
+  - `def __init__(self)` (L186)
+  - `def _strip_comments_preserving_lines(self, html)` (L189) - Replaces HTML comments <!-- ... --> with equivalent newlines.
+  - `def inspect_gtm_container_content(gtm_content)` (L202) - Deep-inspects GTM container body.
+  - `def scan_html(self, raw_html, page_url, policy_text, gtm_containers, site_has_valid_privacy_policy)` (L228) - Runs comprehensive 152-FZ compliance audit on raw HTML payload.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/schema.py`
 - `class SlotID` (L14-L31) - The 16 Legal Stalk Vertices v in {0..15} of the Cellular Sheaf.
@@ -333,22 +409,7 @@
 - `class DocumentInput` (L141-L186) - Input payload for legal sheaf verification (Pure Text and HTML/DOM only).
 - `class SlotDiagnostic` (L189-L195) - Diagnostic profile of an individual legal slot vertex.
 - `class EdgeConflict` (L198-L206) - Diagnostic record of dynamic cellular sheaf edge conflict.
-- `class VerificationReport` (L209-L231) - Complete, deterministic legal verification report with conformal guarantees.
-
-## `legal_sheaf_verifier/src/legal_sheaf/sheaf_model.py`
-- `class SlotMicroVerifier` (L85-L138) - Parallel micro-verifier evaluating all 16 slot stalks simultaneously via torch.einsum.
-  - `def __init__(self, num_slots, in_dim, hidden_dim, out_dim)` (L91)
-  - `def forward(self, x)` (L108) - x: [Batch, 16, 36]
-- `class DynamicCellularSheafLayer` (L141-L237) - Context-conditional cellular sheaf diffusion layer.
-  - `def __init__(self, edges, stalk_dim, edge_dim, alpha)` (L151)
-  - `def forward(self, X)` (L195) - X: [Batch, 16, 41]
-- `class ExplainableReadout` (L240-L290) - Explainable readout head for LegalSheafNet.
-  - `def __init__(self, num_slots, stalk_dim, num_edges, num_regimes)` (L250)
-  - `def forward(self, X_final, edge_energies)` (L266) - X_final: [Batch, 16, 41]
-- `class LegalSheafNet16x41` (L293-L404) - Complete LegalSheafNet-16x41 Neural Network Architecture.
-  - `def __init__(self, num_slots, in_params, full_params, edges, num_layers, edge_dim)` (L300)
-  - `def forward(self, x)` (L345) - x: [Batch, 16, 36] input state tensor
-  - `def compute_stiefel_orthogonality_loss(self)` (L384) - Stiefel Orthogonality Loss L_orth:
+- `class VerificationReport` (L209-L234) - Complete, deterministic legal verification report with conformal guarantees.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/triad_decision_router.py`
 - `def sanitize_before_external_decision(text)` (L60) - 152-FZ PII Defense Gateway:
@@ -368,83 +429,53 @@
   - `def __init__(self, bundle, api_key)` (L370)
   - `async def decide_document(self, doc, client)` (L378) - Executes Triad routing for a given DocumentInput.
 
+## `legal_sheaf_verifier/src/legal_sheaf/vega_grey_zone.py`
+- `def normalize_atomic_facts(raw)` (L36) - Normalizes F1..F5 or F1_OBJECT_PROMOTED..F5_BANNED_OR_SPECIAL into canonical boolean dict.
+- `def derive_regime_from_atomic_facts(tier0, facts)` (L52) - Computes (expected_is_violation, LegalRegime) deterministically from Tier 0 immutable facts
+- `def _build_grey_zone_questions()` (L120)
+- `def evaluate_grey_zone_with_vega(sensor, title, url, external_links, link_windows, tier0_flags)` (L161) - Tier 2 local non-autoregressive Vega-U judge for grey-zone ABSTAIN_REVIEW articles.
+
 ## `legal_sheaf_verifier/src/legal_sheaf/vendor_chain.py`
 - `class TriState` (L46-L50) - Three-valued logic under Kleene semantics: TRUE | FALSE | UNVERIFIED.
-- `def _get_db_path()` (L97) - Returns path to vendor dossiers SQLite database and ensures parent directory exists.
-- `def init_vendor_db()` (L103) - Initializes SQLite connection in WAL mode with requisite tables.
-- `def get_cached_vendor_dossier(vendor_root)` (L141) - Retrieves cached dossier if fresh (< 14 days).
-- `def save_vendor_dossier(dossier)` (L161) - Saves vendor dossier into SQLite cache ONLY if verified (200 OK / non-error).
-- `def save_discovered_vendor_lead(inn, entity_name, vendor_root, found_on_client_domain, risk_reasons)` (L205) - Saves discovered domestic vendor with compliance risks as a B2B sales lead.
-- `def match_known_vendor(host)` (L233) - Checks if host or any parent domain belongs to KNOWN_INFRA_VENDORS.
-- `async def inspect_unknown_vendor_hop1(vendor_host, client_domain, client)` (L260) - Automatic Jump to Source of Unknown Widget (Hop 0 -> Hop 1):
-- `async def audit_vendor_supply_chain(client_domain, all_html_pages, policy_html, client, max_unknown_vendors, visited_roots)` (L480) - Extracts all external scripts/iframes across client pages and subdomains.
+- `def _get_db_path()` (L91) - Returns path to vendor dossiers SQLite database and ensures parent directory exists.
+- `def init_vendor_db()` (L97) - Initializes SQLite connection in WAL mode with requisite tables.
+- `def get_cached_vendor_dossier(vendor_root)` (L135) - Retrieves cached dossier if fresh (< 14 days).
+- `def save_vendor_dossier(dossier)` (L155) - Saves vendor dossier into SQLite cache ONLY if verified (200 OK / non-error).
+- `def save_discovered_vendor_lead(inn, entity_name, vendor_root, found_on_client_domain, risk_reasons)` (L199) - Saves discovered domestic vendor with compliance risks as a B2B sales lead.
+- `def match_known_vendor(host)` (L227) - Checks if host or any parent domain belongs to KNOWN_INFRA_VENDORS.
+- `async def inspect_unknown_vendor_hop1(vendor_host, client_domain, client)` (L254) - Automatic Jump to Source of Unknown Widget (Hop 0 -> Hop 1):
+- `async def audit_vendor_supply_chain(client_domain, all_html_pages, policy_html, client, max_unknown_vendors, visited_roots)` (L474) - Extracts all external scripts/iframes across client pages and subdomains.
 
 ## `legal_sheaf_verifier/src/legal_sheaf/web_templates.py`
-- `def render_landing_page()` (L17) - Renders main public landing page for AdRadar (Russian Engineering Fintech).
-- `def render_demo_page()` (L843) - Renders an interactive demonstration audit sheet (/demo) showing the X-Ray capabilities.
+- `def render_landing_page(operator_email, operator_legal_name)` (L19) - Renders main public landing page for AdRadar (Russian Engineering Fintech).
+- `def render_demo_page()` (L865) - Renders an interactive demonstration audit sheet (/demo) showing the X-Ray capabilities.
 
 ## `legal_sheaf_verifier/src/showcase_server.py`
-- `def check_rate_limit(client_ip, limit, window_sec)` (L54) - Enforces rate limiting of maximum requests per window per IP.
-- `def init_lead_db()` (L67) - Ensures SQLite lead database and tables exist.
-- `def save_inbound_lead(domain, phone, email, tariff, client_ip)` (L85) - Persists a new inbound lead to SQLite.
-- `def load_manifest()` (L101) - Loads token-to-report manifest from disk.
-- `def save_manifest(manifest)` (L113) - Saves updated manifest to disk.
-- `def cleanup_expired_leads(max_age_hours)` (L122) - Deletes report folders and manifest records older than max_age_hours.
-- `async def send_telegram_notification(entry, client_ip, user_agent)` (L166) - Sends instant Telegram notification when a real human opens an audit report.
-- `async def send_lead_telegram_notification(domain, phone, email, tariff, client_ip)` (L224) - Sends instant Telegram notification when a customer submits an order form.
-- `async def handle_index(request)` (L268) - Renders public landing page.
-- `async def handle_demo(request)` (L274) - Renders demonstration audit sheet.
-- `async def handle_privacy_policy(request)` (L280) - Renders 100% compliant benchmark privacy policy for AdRadar itself.
-- `async def handle_consent(request)` (L292) - Renders 100% compliant benchmark consent document under 156-FZ.
-- `async def handle_express_check(request)` (L303) - Rate-limited API for instant website X-Ray preview teaser.
-- `async def handle_lead_submission(request)` (L362) - Inbound lead capture API. Requires explicit consent_pd == True.
-- `async def handle_showcase(request)` (L405) - Renders 72-hour report by secret token, filters preview bots, and triggers alert.
-- `async def handle_health(request)` (L463) - Lightweight health check for reverse proxy / systemd watchdog.
-- `def create_app()` (L468) - Creates and configures the aiohttp web application.
-- `def main()` (L482)
-
-## `visual_qc/nemotron_verifier.py`
-- `def get_openrouter_api_key()` (L45) - Retrieves OPENROUTER_API_KEY from environment, .env in working dir, or C:\AdRadarData\.env.
-- `def load_citation_whitelist()` (L81) - Loads closed whitelist of verified court cases, agency letters, and allowed KoAP articles.
-- `def sanitize_model_citations(text, allowed_citations, allowed_koap)` (L111) - Scans model output text for court case, agency letter patterns, and unauthorized KoAP articles.
-- `def _parse_json_resilient(text)` (L149) - Extracts JSON object from text, handling markdown fences and edge formatting.
-- `class LiveCatalogResolver` (L169-L314) - Syncs and validates OpenRouter model IDs against live API catalog.
-  - `def __init__(self, config_path)` (L177)
-  - `def _find_config(self)` (L186)
-  - `def _load_config(self)` (L198)
-  - `async def get_live_catalog(self, client)` (L206) - Loads cached catalog or fetches fresh from OpenRouter API if older than 24h.
-  - `async def resolve_models(self, paid_zdr_mode, client)` (L248) - Resolves prioritized, validated list of candidate models for execution.
-- `class CircuitBreaker` (L320-L349) - Tracks consecutive errors (429, 503, timeout) per model.
-  - `def __init__(self, failure_threshold, cooldown_seconds)` (L326)
-  - `def is_available(self, model)` (L332)
-  - `def record_failure(self, model)` (L338)
-  - `def record_success(self, model)` (L347)
-- `class VlmRateLimiter` (L352-L372) - Sliding-window rate limiter enforcing 12 RPM (Requests Per Minute).
-  - `def __init__(self, max_rpm)` (L355)
-  - `async def acquire(self)` (L361)
-- `class VlmSqliteCache` (L378-L432) - Idempotent cache for VLM responses keyed by SHA-256(url + collage_bytes + prompt_ver).
-  - `def __init__(self, db_path)` (L381)
-  - `def _init_db(self)` (L386)
-  - `def compute_key(collage_bytes, findings, prompt_ver)` (L401)
-  - `def get(self, cache_key)` (L409)
-  - `def set(self, cache_key, data, model_used)` (L423)
-- `class ContextRuleReconciler` (L438-L508) - Enforces strict authority boundaries on VLM decisions:
-  - `def reconcile(self, findings_verdicts, original_findings, allowed_citations, allowed_koap)` (L460)
-- `async def verify_visual_triggers(collage_path, audit_findings, policy_snippet, paid_zdr_mode, client, api_key, primary_model)` (L522) - Verifies visual trigger zones in collage against automated scanner findings using VLM.
-
-## `visual_qc/review_desk.py`
-- `def map_finding_to_zone(finding_id, law_norm, quote)` (L23) - Maps a compliance finding to its visual sniper trigger zone:
-- `def build_commercial_proposal_text(domain, company_name, approved_findings, total_min_fine, total_max_fine)` (L44) - Generates ready-to-dispatch commercial proposal text in Russian Engineering Fintech style.
-- `def generate_review_desk_html(domain, audit_result, capture_result, vlm_result, output_dir, vega_verdicts_map)` (L88) - Renders self-contained review_desk.html (0 CDNs, 100% inline CSS/JS).
-
-## `visual_qc/trigger_cropper.py`
-- `def is_ssrf_dangerous_url(target_url)` (L41) - Validates whether a URL attempts an SSRF against internal/private infrastructure
-- `def _slugify(domain_or_url)` (L79) - Converts URL or domain into a clean filesystem slug.
-- `def extract_policy_methods_snippet(policy_html_or_text, max_chars)` (L88) - Extracts high-relevance paragraphs discussing processing methods, metrics, and third parties.
-- `async def _locate_text_anchor_rect(page, patterns)` (L142) - Scans DOM for text matching patterns to determine presence and exact sniper coordinates.
-- `async def _capture_zone_screenshot(page, zone_id, title, selectors, fallback_clip, text_patterns)` (L190) - Two-stage sniper targeting:
-- `async def _stitch_collage_in_browser(page, zones)` (L268) - Stitches captured zone crops into a unified PNG collage via HTML5 <canvas> inside Chromium.
-- `async def capture_trigger_zones(url, audit_findings, output_dir, policy_text)` (L367) - Navigates to URL, smoothly scrolls to ensure dynamic footer rendering,
+- `def load_runtime_env()` (L90) - Loads runtime configuration from ADRADAR_DATA_DIR/.env, repository root .env, and CWD/.env
+- `def get_operator_config()` (L124) - Reads operator requisites and public URL strictly from environment configuration.
+- `def get_auditor()` (L142) - Returns process-wide DualAuditor singleton to avoid reloading ONNX/KB per request.
+- `def get_client_ip(request)` (L150) - Resolves client IP from socket peer (request.remote).
+- `def _prune_rate_limit_store(now, window_sec)` (L164) - Removes expired entries and caps RATE_LIMIT_STORE to prevent unbounded memory growth.
+- `def check_rate_limit(client_ip, limit, window_sec)` (L184) - Enforces bounded per-key rate limiting of maximum requests per window.
+- `def _allowed_cors_origins()` (L200)
+- `async def security_and_cors_middleware(request, handler)` (L214) - Attaches strict security headers and handles explicit CORS preflight requests.
+- `def init_lead_db()` (L243) - Ensures SQLite lead database and tables exist.
+- `def save_inbound_lead(domain, phone, email, tariff, client_ip)` (L261) - Persists a new inbound lead to SQLite.
+- `def load_manifest()` (L277) - Loads token-to-report manifest from disk.
+- `def save_manifest(manifest)` (L290) - Saves updated manifest to disk.
+- `def cleanup_expired_leads(max_age_hours)` (L300) - Deletes report folders and manifest records older than max_age_hours.
+- `async def send_telegram_notification(entry, client_ip, user_agent)` (L352) - Sends instant Telegram notification when a real human opens an audit report.
+- `async def send_lead_telegram_notification(domain, phone, email, tariff, client_ip)` (L412) - Sends instant Telegram notification when a customer submits an order form.
+- `async def handle_index(request)` (L458) - Renders public landing page.
+- `async def handle_demo(request)` (L468) - Renders demonstration audit sheet.
+- `async def handle_privacy_policy(request)` (L474) - Renders benchmark privacy policy populated strictly from environment requisites.
+- `async def handle_consent(request)` (L488) - Renders benchmark consent document under 156-FZ from environment requisites.
+- `async def handle_express_check(request)` (L502) - Rate-limited API for instant website X-Ray preview teaser.
+- `async def handle_lead_submission(request)` (L625) - Inbound lead capture API. Enforces rate limit, JSON dict check, and explicit consent_pd == True.
+- `async def handle_showcase(request)` (L676) - Renders 72-hour report by secret token, filters preview bots, and triggers alert.
+- `async def handle_health(request)` (L742) - Lightweight health check for reverse proxy / systemd watchdog.
+- `def create_app()` (L747) - Creates and configures the aiohttp web application.
+- `def main()` (L764)
 
 ## `verification_engine/sheaf_vega_verifier.py`
 - `class VerifiedFactBundle` (L34-L63) - Deterministic fact contract produced by LegalSheafNet-16x41,
@@ -462,72 +493,113 @@
   - `def verify_draft(self, draft_text, fact_bundle, run_sensor)` (L245) - Verifies a generated text proposal or report against the VerifiedFactBundle.
 - `def fit_from_review_desk(feedback_records, output_dir)` (L325) - Saves reviewer decisions from review_desk.html to disk for continual calibration.
 
+## `vlm_context_engine/gemini_gateway.py`
+- `def _active_data_dir()` (L45)
+- `def get_gemini_api_keys()` (L55) - Retrieves Google Gemini API key pool from environment or ADRADAR_DATA_DIR/.env / repo .env / CWD/.env.
+- `def get_gemini_api_key()` (L86) - Retrieves primary GEMINI_API_KEY / GOOGLE_API_KEY.
+- `def extract_gemini_response_text(payload)` (L92) - Extracts model answer text from Gemini generateContent JSON, skipping thinking parts
+- `class GeminiCatalogResolver` (L118-L261) - Loads model configuration from legal_sheaf_verifier/config/gemini_models.yaml
+  - `def __init__(self, config_path)` (L124)
+  - `def _find_config()` (L142)
+  - `def _load_config(self)` (L154)
+  - `async def get_live_catalog(self, api_key, client)` (L162) - Loads 24h cached Gemini models catalog or queries GET /v1beta/models.
+  - `async def resolve_models(self, vip_mode, api_key, client)` (L223) - Returns prioritized non-banned Gemini model IDs from gemini_models.yaml.
+- `class GeminiGateway` (L267-L687) - Direct Google Gemini API gateway for Track A decisions and Track B visual verification.
+  - `def __init__(self, api_key, catalog_resolver, circuit_breaker, rate_limiter, cache, api_keys)` (L274)
+  - `def _active_key_pool(self)` (L305)
+  - `def _rotate_past_key(self, used_key)` (L313)
+  - `def _build_headers(api_key)` (L322)
+  - `def _build_request_body(system_instruction, user_text, image_bytes, mime_type, model_id, temperature)` (L329)
+  - `async def track_a_decide(self, instructions, context_data, decision_questions, image_bytes, client)` (L356) - Executes structured decision arbitration via Direct Gemini API.
+  - `async def track_b_chat_verify(self, collage_path, audit_findings, policy_snippet, paid_mode, client, primary_model)` (L451) - Executes multimodal visual verification of 3 trigger zones using Direct Gemini Vision API.
+- `def get_default_gemini_gateway()` (L694) - Returns a lazy singleton GeminiGateway bound to the active ADRADAR_DATA_DIR.
+
 ## `vlm_context_engine/live_catalog.py`
 - `class FinancialLockViolation` (L36-L38) - Raised when a paid model is requested or detected in free rotation.
-- `class LiveCatalogResolver` (L41-L251) - Syncs and validates OpenRouter model IDs against live API catalog.
+- `class LiveCatalogResolver` (L41-L264) - Syncs and validates OpenRouter model IDs against live API catalog.
   - `def __init__(self, config_path)` (L49)
-  - `def _find_config(self)` (L59)
-  - `def _load_config(self)` (L71)
-  - `async def get_live_catalog(self, client)` (L79) - Loads cached catalog or fetches fresh from OpenRouter API if older than 24h.
-  - `async def check_key_limits(self, api_key, client)` (L124) - Queries GET https://openrouter.ai/api/v1/key to verify limits and remaining credits.
-  - `def verify_model_free(self, model_id, catalog)` (L161) - Financial Lock Invariant:
-  - `async def resolve_models(self, paid_zdr_mode, client)` (L198) - Resolves prioritized, validated list of candidate models for execution.
+  - `def _find_config(self)` (L72)
+  - `def _load_config(self)` (L84)
+  - `async def get_live_catalog(self, client)` (L92) - Loads cached catalog or fetches fresh from OpenRouter API if older than 24h.
+  - `async def check_key_limits(self, api_key, client)` (L137) - Queries GET https://openrouter.ai/api/v1/key to verify limits and remaining credits.
+  - `def verify_model_free(self, model_id, catalog)` (L174) - Financial Lock Invariant:
+  - `async def resolve_models(self, paid_zdr_mode, client)` (L211) - Resolves prioritized, validated list of candidate models for execution.
 
 ## `vlm_context_engine/openrouter_gateway.py`
-- `def get_openrouter_api_key()` (L49) - Retrieves OPENROUTER_API_KEY from environment, local .env, or C:\AdRadarData\.env.
-- `def load_citation_whitelist()` (L82) - Loads closed whitelist of verified court cases, agency letters, and allowed KoAP articles.
-- `def sanitize_model_citations(text, allowed_citations, allowed_koap)` (L106) - Scans model output text for court case, agency letter patterns, and unauthorized KoAP articles.
-- `def extract_json_resilient(raw_response)` (L144) - Extracts JSON dictionary from raw model response.
-- `def _parse_json_resilient(text)` (L196) - Backward compatibility alias for extract_json_resilient.
-- `class CircuitBreaker` (L204-L315) - Tracks consecutive errors (429, 503, timeout) per model with SQLite persistence.
-  - `def __init__(self, failure_threshold, cooldown_seconds, db_path)` (L210)
-  - `def _load_from_db(self)` (L223)
-  - `def is_available(self, model)` (L237)
-  - `def record_failure(self, model)` (L241)
-  - `def record_success(self, model)` (L275)
-- `class TokenBucketRateLimiter` (L318-L337) - Token-Bucket rate limiter enforcing a strict 12 RPM maximum.
-  - `def __init__(self, max_rpm)` (L321)
-  - `async def acquire(self)` (L327)
-- `class VlmSqliteCache` (L343-L414) - Idempotent cache for VLM responses keyed by SHA-256(url + collage_bytes + prompt_ver).
-  - `def __init__(self, db_path)` (L346)
-  - `def _init_db(self)` (L351)
-  - `def compute_key(payload_bytes, findings, prompt_ver)` (L383)
-  - `def get(self, cache_key)` (L391)
-  - `def set(self, cache_key, data, model_used)` (L405)
-- `class OpenRouterGateway` (L420-L819) - Dual-track OpenRouter gateway for multimodal and decision verification.
-  - `def __init__(self, api_key, catalog_resolver, circuit_breaker, rate_limiter, cache)` (L428)
-  - `async def track_a_decide(self, instructions, context_data, decision_questions, image_bytes, client)` (L446) - Executes structured decision arbitration.
-  - `async def track_b_chat_verify(self, collage_path, audit_findings, policy_snippet, paid_mode, client, primary_model)` (L571) - Executes multimodal visual verification of 3 trigger zones in collage.
-- `async def verify_visual_triggers(collage_path, audit_findings, policy_snippet, paid_zdr_mode, client, api_key, primary_model)` (L826) - Backward-compatible entry point for visual verification callers.
+- `def _active_data_dir()` (L42)
+- `def _read_env_key(env_path, target_key)` (L56) - Safely extracts target_key from a .env file without mutating global os.environ.
+- `def _parse_api_key_list(raw)` (L75) - Splits comma/semicolon/whitespace separated OpenRouter keys and deduplicates preserving order.
+- `def _mask_api_key(key)` (L85) - Returns a non-sensitive masked identifier for logging (never logs full secret).
+- `def get_openrouter_api_keys()` (L92) - Retrieves OpenRouter API key pool from environment or ADRADAR_DATA_DIR/.env / repo .env / CWD/.env.
+- `def get_openrouter_api_key()` (L124) - Retrieves primary OPENROUTER_API_KEY from environment, ADRADAR_DATA_DIR/.env, repo .env, or CWD/.env.
+- `def load_citation_whitelist()` (L130) - Loads closed whitelist of verified court cases, agency letters, and allowed KoAP articles.
+- `def _sanitize_text_citations(text, allowed_citations, allowed_koap)` (L155) - Sanitizes a single string against verified citations and KoAP articles.
+- `def sanitize_model_citations(text_or_payload, allowed_citations, allowed_koap)` (L190) - Scans model output (string or VLM response dict) for unverified court case numbers,
+- `def extract_json_resilient(raw_response)` (L227) - Extracts JSON dictionary from raw model response.
+- `def _parse_json_resilient(text)` (L279) - Backward compatibility alias for extract_json_resilient.
+- `class CircuitBreaker` (L287-L398) - Tracks consecutive errors (429, 503, timeout) per model with SQLite persistence.
+  - `def __init__(self, failure_threshold, cooldown_seconds, db_path)` (L293)
+  - `def _load_from_db(self)` (L306)
+  - `def is_available(self, model)` (L320)
+  - `def record_failure(self, model)` (L324)
+  - `def record_success(self, model)` (L358)
+- `class TokenBucketRateLimiter` (L401-L420) - Token-Bucket rate limiter enforcing a strict 12 RPM maximum.
+  - `def __init__(self, max_rpm)` (L404)
+  - `async def acquire(self)` (L410)
+- `class VlmSqliteCache` (L426-L497) - Idempotent cache for VLM responses keyed by SHA-256(url + collage_bytes + prompt_ver).
+  - `def __init__(self, db_path)` (L429)
+  - `def _init_db(self)` (L434)
+  - `def compute_key(payload_bytes, findings, prompt_ver)` (L466)
+  - `def get(self, cache_key)` (L474)
+  - `def set(self, cache_key, data, model_used)` (L488)
+- `class OpenRouterGateway` (L503-L1001) - Dual-track OpenRouter gateway for multimodal and decision verification.
+  - `def __init__(self, api_key, catalog_resolver, circuit_breaker, rate_limiter, cache, api_keys)` (L511)
+  - `def _active_key_pool(self)` (L542) - Returns active API keys rotated from current cursor, excluding exhausted keys.
+  - `def _rotate_past_key(self, used_key)` (L551)
+  - `def _build_headers(api_key, title)` (L559)
+  - `async def track_a_decide(self, instructions, context_data, decision_questions, image_bytes, client)` (L570) - Executes structured decision arbitration.
+  - `async def track_b_chat_verify(self, collage_path, audit_findings, policy_snippet, paid_mode, client, primary_model)` (L724) - Executes multimodal visual verification of 3 trigger zones in collage.
+- `def get_default_gateway()` (L1009) - Returns a lazy singleton OpenRouterGateway bound to the active ADRADAR_DATA_DIR.
+- `async def verify_visual_triggers(collage_path, audit_findings, policy_snippet, paid_zdr_mode, client, api_key, primary_model, provider)` (L1019) - Unified entry point for visual verification callers.
 
 ## `vlm_context_engine/reconciler.py`
 - `class ContextRuleReconciler` (L24-L152) - Arbitrates scanner findings against multimodal VLM verdicts with legal domain safeguards.
   - `def reconcile(self, findings_verdicts, original_findings, page_genre, allowed_citations, allowed_koap)` (L54) - Reconciles VLM verdicts against factual ground-truth, page genre, and readability grades.
 
 ## `vlm_context_engine/review_desk.py`
-- `def map_finding_to_zone(finding_id, law_norm, quote)` (L25) - Maps a compliance finding to its visual sniper trigger zone:
-- `def build_commercial_proposal_text(domain, company_name, approved_findings, total_min_fine, total_max_fine)` (L46) - Generates ready-to-dispatch commercial proposal text in Russian Engineering Fintech style.
-- `class ReviewDeskBuilder` (L90-L109) - Builder class for rendering 100% self-contained review_desk.html interfaces.
-  - `def render(domain, audit_result, capture_result, vlm_result, output_dir, vega_verdicts_map)` (L94)
-- `def generate_review_desk_html(domain, audit_result, capture_result, vlm_result, output_dir, vega_verdicts_map)` (L112) - Renders self-contained review_desk.html (0 CDNs, 100% inline CSS/JS).
+- `def _active_review_desk_dir()` (L32)
+- `def map_finding_to_zone(finding_id, law_norm, quote)` (L39) - Maps a compliance finding to its visual sniper trigger zone:
+- `def build_commercial_proposal_text(domain, company_name, approved_findings, total_min_fine, total_max_fine)` (L60) - Generates ready-to-dispatch commercial proposal text in Russian Engineering Fintech style.
+- `def _extract_fine_range(audit_result, raw_findings)` (L104) - Extracts non-zero KoAP penalty bounds from audit_result['penalties'] using
+- `class ReviewDeskBuilder` (L162-L181) - Builder class for rendering 100% self-contained review_desk.html interfaces.
+  - `def render(domain, audit_result, capture_result, vlm_result, output_dir, vega_verdicts_map)` (L166)
+- `def generate_review_desk_html(domain, audit_result, capture_result, vlm_result, output_dir, vega_verdicts_map)` (L184) - Renders self-contained review_desk/index.html (0 CDNs, 100% inline CSS/JS).
+- `def generate_review_desk_batch_index(entries, output_dir)` (L976) - Renders self-contained batch index page (review_desk/index.html) linking all
+
+## `vlm_context_engine/tests/conftest.py`
+- `def isolate_adradar_data_dir(tmp_path, monkeypatch)` (L19) - Redirects ADRADAR_DATA_DIR and all VLM/cache/review_desk paths to tmp_path.
 
 ## `vlm_context_engine/tests/test_vlm_context_engine.py`
-- `def test_live_catalog_financial_lock()` (L44)
-- `def test_live_catalog_resolve_models_banned_exclusion()` (L72)
-- `def test_is_ssrf_dangerous_url()` (L85)
-- `def test_extract_policy_methods_snippet()` (L112)
-- `def test_circuit_breaker(tmp_path)` (L130)
-- `def test_circuit_breaker_sqlite_persistence(tmp_path)` (L151)
-- `def test_extract_json_resilient()` (L175)
-- `def test_rate_limiter()` (L195)
-- `def test_sqlite_cache(tmp_path)` (L206)
-- `def test_sanitize_model_citations()` (L221)
-- `def test_gateway_zero_mock_without_api_key(tmp_path)` (L239)
-- `def test_reconciler_asymmetric_lock()` (L263)
-- `def test_reconciler_micro_font_requalification()` (L293)
-- `def test_reconciler_contextual_quarantine()` (L319)
-- `def test_reconciler_valid_false_positive_allowed()` (L355)
-- `def test_review_desk_html_zero_cdn(tmp_path)` (L381)
+- `def test_live_catalog_financial_lock()` (L47)
+- `def test_live_catalog_resolve_models_banned_exclusion()` (L75)
+- `def test_is_ssrf_dangerous_url()` (L88)
+- `def test_extract_policy_methods_snippet()` (L115)
+- `def test_circuit_breaker(tmp_path)` (L133)
+- `def test_circuit_breaker_sqlite_persistence(tmp_path)` (L154)
+- `def test_extract_json_resilient()` (L178)
+- `def test_rate_limiter()` (L198)
+- `def test_sqlite_cache(tmp_path)` (L209)
+- `def test_sanitize_model_citations()` (L224)
+- `def test_gateway_zero_mock_without_api_key(tmp_path)` (L242)
+- `def test_reconciler_asymmetric_lock()` (L266)
+- `def test_reconciler_micro_font_requalification()` (L296)
+- `def test_reconciler_contextual_quarantine()` (L322)
+- `def test_reconciler_valid_false_positive_allowed()` (L358)
+- `def test_review_desk_html_zero_cdn(tmp_path)` (L384)
+- `def test_review_desk_sprint2_controls_and_fines(tmp_path)` (L446)
+- `def test_openrouter_gateway_env_and_nested_citation_lock(tmp_path, monkeypatch)` (L538)
+- `def test_openrouter_gateway_multi_key_pool_and_rotation(tmp_path, monkeypatch)` (L568)
+- `def test_gemini_gateway_zero_mock_and_vision_and_citation_lock(tmp_path)` (L648)
 
 ## `vlm_context_engine/trigger_cropper.py`
 - `def is_ssrf_dangerous_url(target_url)` (L47) - Validates whether a URL attempts an SSRF against internal/private infrastructure
@@ -538,14 +610,77 @@
 - `async def _stitch_collage_in_browser(page, zones)` (L273) - Stitches captured zone crops into a unified PNG collage via HTML5 <canvas> inside Chromium.
 - `async def capture_trigger_zones(url, audit_findings, output_dir, policy_text)` (L379) - Navigates to URL, smoothly scrolls to ensure dynamic footer rendering,
 
-## `scripts/build_champion_v2_bundle.py`
-- `def main()` (L26)
+## `scripts/build_champion_v3_bundle.py`
+- `def _compute_binary_eval_metrics(probs, preds, labels, pred_regimes, true_regimes)` (L50)
+- `def _is_grey_zone_record(row)` (L89)
+- `def _evaluate_bundle_on_statutory_holdout(bundle, seed, num_samples)` (L103)
+- `def evaluate_bundle_on_real_vcru_golden(bundle, golden_path)` (L131)
+- `async def _run_dual_auditor_comparison(bundle, golden_path, use_vega)` (L211)
+- `def main()` (L250)
+
+## `scripts/collect_vcru_labeling_set.py`
+- `def _active_data_dir()` (L73)
+- `def _normalize_url_key(url)` (L78)
+- `def load_golden_exclusions(golden_path)` (L82) - Loads all post_ids and normalized URLs from golden_set_real_vcru.jsonl
+- `def _load_bundle()` (L106)
+- `def _build_smart_text_window(combined_text, paragraphs, commercial_targets)` (L121) - Constructs a representative text_window without truncating the article tail:
+- `def _extract_entry_fields(entry, rubric_hint)` (L163)
+- `async def _fetch_post_detail(client, post_id)` (L325)
+- `async def _resolve_rubric_subsite_ids(client, slugs)` (L339)
+- `async def harvest_vcru_pool_raw(target_pool_count, scan_limit, golden_path)` (L365) - Harvests 120-150 rich multi-rubric live VC.ru articles across
+- `async def harvest_vcru_live(target_label_count, min_golden_count, scan_limit)` (L539)
+- `def main()` (L775)
+
+## `scripts/ensemble_labeler.py`
+- `def _sanitize_citations_safe(text)` (L92)
+- `def evaluate_tier1a_sheaf(bundle, record, tier0)` (L110) - Evaluates LinkCentricAdClassifierV3 and maps regime + Tier 0 facts into atomic facts F1..F5.
+- `def _active_data_dir()` (L124)
+- `def _normalize_url(url)` (L129)
+- `def load_golden_blocklist(golden_path)` (L133) - Loads all post_ids and URLs from golden_set_real_vcru.jsonl to guarantee zero data leakage.
+- `def load_jury_models_config(config_path)` (L154) - Loads external model IDs strictly from legal_sheaf_verifier/config/openrouter_models.yaml
+- `def load_gemini_jury_models_config(config_path)` (L228) - Loads ensemble_labeler_jury models strictly from legal_sheaf_verifier/config/gemini_models.yaml.
+- `class EnsembleJuryCache` (L258-L326) - Idempotent SQLite WAL cache for external jury verdicts so reruns spend 0 API calls.
+  - `def __init__(self, db_path)` (L261)
+  - `def _init_db(self)` (L267)
+  - `def make_key(post_id, digest_text, tier_slot)` (L286)
+  - `def get(self, cache_key)` (L290)
+  - `def set(self, cache_key, post_id, tier_slot, model_used, payload)` (L306)
+- `def build_tier0_passport(record)` (L332) - Computes immutable Tier 0 deterministic legal facts (erid, strict ad label,
+- `def evaluate_tier1a_sheaf(bundle, record, tier0)` (L427) - Evaluates LinkCentricAdClassifierV3 and maps regime + Tier 0 facts into atomic facts F1..F5.
+- `def evaluate_tier1b_vega(sensor, tier0)` (L478) - Evaluates all 5 atomic facts F1..F5 in a single non-autoregressive Vega-U pass on RTX 4060.
+- `def _build_batch_jury_prompt(items, role_mode)` (L596)
+- `def _extract_json_items_array(raw_text)` (L633) - Extracts list of per-article JSON dicts from either {'items': [...]} or [...] output.
+- `class MultiFamilyCloudJury` (L673-L1100) - Executes Tier 2A (Decision-1), Tier 2B (NVIDIA MoE), and Tier 2C (Independent Dense)
+  - `def __init__(self, cache, api_keys, gemini_api_key, models_cfg, gemini_models_cfg)` (L679)
+  - `def _store_batch_jury_payloads(self, parsed_list, uncached, tier_slot, family_tag, model_id, results)` (L702)
+  - `async def _call_gemini_batch(self, client, tier_slot, family_tag, model_candidates, batch_items, role_mode)` (L742)
+  - `def _next_keys(self)` (L808)
+  - `def _advance_key(self, used_key)` (L815)
+  - `async def _call_openrouter_batch(self, client, tier_slot, family_tag, model_candidates, batch_items, role_mode)` (L819)
+  - `async def evaluate_tier2a_decision(self, client, batch_items)` (L935) - Tier 2A: Attempts GeminiDecisionTeacher (Decision-1 zero-output-token API);
+- `def extract_highlighted_micro_quote(record, tier0, disputed_fact, max_len)` (L1106) - Cuts a single compact snippet (<= 300 chars) around the disputed trigger
+- `def build_micro_question(record, tier0, votes, external_doubt_ru)` (L1203) - Identifies the single highest-conflict atomic fact across jury members and
+- `def arbitrate_ensemble_votes(record, tier0, votes, external_chat_vote, min_consensus_conf)` (L1360) - Enforces the Anti-Echo-Chamber Rule:
+- `async def run_ensemble_pipeline(input_path, output_path, cloud_batch_size, skip_cloud, vega_light_mode, limit, provider)` (L1459)
+- `def export_chat_batches(ensemble_jsonl, batches_dir, batch_size, only_disputed)` (L1623) - Generates compact 10-article Markdown prompt files (batch_01.md, batch_02.md, ...)
+- `def import_chat_batch_json(ensemble_jsonl, chat_json_path, min_consensus_conf)` (L1710) - Imports external Frontier LLM chat JSON array into ensemble_jsonl and re-runs
+- `def export_clean_training_jsonl(ensemble_jsonl, out_labeled_jsonl)` (L1802) - Exports ONLY verified records into vcru_human_labeled.jsonl:
+- `async def prepare_wide_boost_dossiers(ensemble_jsonl, dossiers_out)` (L1906) - Wide External Forensics for genuinely disputed articles:
+- `def apply_deep_boost_verdicts(ensemble_jsonl, boost_verdicts_json, min_boost_conf)` (L2042) - Applies multi-perspective Deep Boost dialectical verdicts onto disputed articles:
+- `def main()` (L2114)
 
 ## `scripts/export_lawyer_dossier.py`
 - `def main()` (L27)
 
 ## `scripts/fit_from_reviews.py`
 - `def main()` (L22)
+
+## `scripts/label_vcru_ui.py`
+- `def _active_data_dir()` (L27)
+- `def _safe_json_for_html_script(obj)` (L32)
+- `def build_labeler_html(records, source_jsonl_path)` (L37)
+- `def generate_labeler_page(input_jsonl, output_html)` (L1123)
+- `def main()` (L1149)
 
 ## `scripts/menu.py`
 - `def clear_screen()` (L40)
@@ -556,12 +691,13 @@
 - `def opt_hunt()` (L85)
 - `def opt_article()` (L104)
 - `def opt_site()` (L119)
-- `def opt_visual()` (L143)
-- `def opt_kit()` (L174)
-- `def opt_horizon()` (L202)
-- `def opt_doctor()` (L217)
-- `def opt_lawyer_doc()` (L227)
-- `def main()` (L244)
+- `def opt_visual()` (L145)
+- `def opt_kit()` (L185)
+- `def opt_horizon()` (L213)
+- `def opt_doctor()` (L228)
+- `def opt_lawyer_doc()` (L238)
+- `def opt_learn_desk()` (L255)
+- `def main()` (L282)
 
 ## `scripts/real_ru_web_scan.py`
 - `def fetch_real_domains_from_osm()` (L55) - Fetches real active Russian corporate domains across major business hubs
@@ -597,30 +733,15 @@
 - `async def run_pipeline()` (L350)
 
 ## `scripts/run_visual_qc.py`
-- `async def run_pipeline(domain, skip_vlm, paid_zdr, gear, fast_no_vega)` (L42) - Executes end-to-end visual audit and review desk generation.
-- `def main()` (L166)
-
-## `scripts/test_full_harvest.py`
-- `def resolve_redirect(url)` (L22)
-- `def clean_domain(raw_url)` (L34)
-- `async def harvest_osnova_stream(client, base_url, subsite_id, sorting, max_pages)` (L52)
-- `async def harvest_habr_companies(client, max_pages)` (L89)
-- `async def main()` (L106)
-
-## `scripts/test_harvest_concurrent.py`
-- `def resolve_vc_redirect(url)` (L20)
-- `def clean_domain(raw_url_or_domain)` (L32)
-- `async def fetch_timeline_page(client, base_api, subsite_id, sorting, last_id, last_val)` (L50)
-- `def extract_domains_from_json(data)` (L62)
-- `async def main()` (L87)
-
-## `scripts/test_pipeline_mini.py`
-- `async def test_mini()` (L26)
-
-## `scripts/test_unquoted_harvest.py`
-- `def clean_domain(dom)` (L20)
-- `async def harvest_stream(client, base_url, subsite_id, sorting, depth)` (L27)
-- `async def main()` (L55)
+- `def _active_data_dir()` (L56)
+- `def load_vip_argon_model()` (L63) - Reads paid_zdr_tier.vip_arbiter model ID from canonical legal_sheaf_verifier/config/openrouter_models.yaml.
+- `def _load_gemini_vlm_config()` (L81) - Reads vlm_visual_qc model settings from legal_sheaf_verifier/config/gemini_models.yaml.
+- `def _slugify_domain(domain)` (L97)
+- `async def _execute_single_visual_qc(domain, skip_vlm, paid_zdr, vip_argon, gear, fast_no_vega, audit_res_override, capture_fn, output_dir, provider)` (L104) - Executes single-domain Visual QC pipeline and returns summary metadata.
+- `async def run_pipeline(domain, skip_vlm, paid_zdr, vip_argon, gear, fast_no_vega, provider)` (L266) - Executes end-to-end single-domain visual audit and review desk generation.
+- `def _resolve_hunt_report_path(raw_path)` (L288)
+- `async def run_batch_from_hunt(hunt_report_path, max_leads, skip_vlm, paid_zdr, vip_argon, gear, fast_no_vega, capture_fn, provider)` (L302) - Runs Visual QC batch over fresh, unsent leads from hunt_vcru_consolidated_report.json
+- `def main()` (L380)
 
 ## `scripts/vcru_hunt_v2.py`
 - `def resolve_vc_redirect(url)` (L81) - Resolves api.vc.ru redirect URLs into clean target destinations.
@@ -640,21 +761,22 @@
 - `def check_inn(s)` (L16)
 
 ## `harness.py`
-- `def garbage_collect_workspace()` (L52) - Moves leftover probe/fix scripts into trash_archive quarantine and verifies workspace hygiene.
-- `def format_ast_args(args_node)` (L78) - Formats function/method arguments into a clean signature string.
-- `def generate_ast_code_map(output_path)` (L94) - Parses all python files in project via ast.parse and generates a concise,
+- `def garbage_collect_workspace()` (L53) - Moves leftover probe/fix scripts into trash_archive quarantine and verifies workspace hygiene.
+- `def format_ast_args(args_node)` (L79) - Formats function/method arguments into a clean signature string.
+- `def generate_ast_code_map(output_path)` (L95) - Parses all python files in project via ast.parse and generates a concise,
 - `def run_ast_policy_guard()` (L190) - Scans production python modules for prohibited simulation constructs:
-- `def load_verified_citations_whitelist()` (L264) - Loads closed whitelist of verified court cases, agency letters, KoAP articles, federal laws, and context bindings.
-- `def run_citation_whitelist_guard()` (L290) - Scans files across all project directories (src, visual_qc, verification_engine, scripts,
-- `class HTMLDOMInspector` (L396-L442) - Standard library HTML parser inspecting tag balance and detecting unparsed markdown.
-  - `def __init__(self, filepath)` (L400)
-  - `def handle_starttag(self, tag, attrs)` (L408)
-  - `def handle_endtag(self, tag)` (L414)
-  - `def handle_data(self, data)` (L434)
-- `def run_artifact_dom_guard()` (L445) - Oracle I: HTML/MD Artifact & Anti-Truncation Inspector.
-- `def cmd_sync()` (L563) - Synchronizes source packages into .venv, runs AST guard, and generates Code Map.
-- `def cmd_probe(script_path)` (L648) - Executes a diagnostic python script safely with UTF-8 encoding.
-- `async def evaluate_semantic_business_oracles()` (L670) - Evaluates 5 strict semantic business invariants on real operational contracts.
-- `def cmd_quick()` (L1006) - Fast intermediate verification in < 3s: sync + AST guard + citation context lock + Oracle I.
-- `def cmd_gate()` (L1035) - Executes the full acceptance pipeline: Gates 1 through 4.
-- `def main()` (L1128)
+- `def load_verified_citations_whitelist()` (L261) - Loads closed whitelist of verified court cases, agency letters, KoAP articles, federal laws, and context bindings.
+- `def run_citation_whitelist_guard()` (L287) - Scans files across all project directories (src, visual_qc, verification_engine, scripts,
+- `class HTMLDOMInspector` (L392-L438) - Standard library HTML parser inspecting tag balance and detecting unparsed markdown.
+  - `def __init__(self, filepath)` (L396)
+  - `def handle_starttag(self, tag, attrs)` (L404)
+  - `def handle_endtag(self, tag)` (L410)
+  - `def handle_data(self, data)` (L430)
+- `def run_artifact_dom_guard()` (L441) - Oracle I: HTML/MD Artifact & Anti-Truncation Inspector.
+- `def run_anti_illusion_and_cli_guard()` (L559) - Oracle J: Anti-Illusion & CLI Integrity Guard.
+- `def cmd_sync()` (L749) - Synchronizes source packages into .venv, runs AST guard, and generates Code Map.
+- `def cmd_probe(script_path)` (L857) - Executes a diagnostic python script safely with UTF-8 encoding.
+- `async def evaluate_semantic_business_oracles()` (L879) - Evaluates 5 strict semantic business invariants on real operational contracts.
+- `def cmd_quick()` (L1229) - Fast intermediate verification in < 3s: sync + AST guard + citation context lock + Oracle I.
+- `def cmd_gate()` (L1258) - Executes the full acceptance pipeline: Gates 1 through 4.
+- `def main()` (L1351)

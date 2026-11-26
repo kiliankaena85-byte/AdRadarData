@@ -9,16 +9,29 @@ Dogfooding 152-FZ and 168-FZ:
 
 from __future__ import annotations
 
+import html
 import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 
-def render_landing_page() -> str:
+def render_landing_page(
+    operator_email: Optional[str] = None,
+    operator_legal_name: Optional[str] = None,
+) -> str:
     """
     Renders main public landing page for AdRadar (Russian Engineering Fintech).
     """
     year = datetime.now().year
+    safe_email = html.escape(
+        operator_email or os.environ.get("OPERATOR_EMAIL") or "[РЕКВИЗИТЫ_ОПЕРАТОРА_ИЗ_ENV]",
+        quote=True,
+    )
+    safe_brand = html.escape(
+        operator_legal_name or os.environ.get("OPERATOR_LEGAL_NAME") or "AdRadar Правовой Инжиниринг",
+        quote=True,
+    )
     return f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -683,7 +696,7 @@ footer {{
                     Оставьте контактные данные — мы свяжемся с вами в течение 30 минут, согласуем объем периметра и сформируем тестовый отчет.
                 </p>
                 <div style="font-size: 13px; color: #334155;">
-                    <p style="margin-bottom: 8px;"><strong>📞 Горячая линия комплаенса:</strong> contact@adradar.ru</p>
+                    <p style="margin-bottom: 8px;"><strong>📞 Горячая линия комплаенса:</strong> {safe_email}</p>
                     <p><strong>🔒 Гарантия конфиденциальности:</strong> данные не передаются третьим лицам.</p>
                 </div>
             </div>
@@ -731,7 +744,7 @@ footer {{
 <footer>
     <div class="container footer-row">
         <div>
-            © {year} AdRadar Правовой Инжиниринг. Автономная система верификации комплаенса.
+            © {year} {safe_brand}. Автономная система верификации комплаенса.
         </div>
         <div class="footer-links">
             <a href="/privacy-policy">Политика конфиденциальности</a>
@@ -742,6 +755,15 @@ footer {{
 </footer>
 
 <script>
+function escapeHtml(str) {{
+    return String(str == null ? "" : str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}}
+
 function selectTariff(name) {{
     var sel = document.getElementById("leadTariff");
     if (sel) {{
@@ -775,15 +797,15 @@ async function runExpressScan(e) {{
         }});
         var data = await resp.json();
         if (resp.ok) {{
-            resDiv.innerHTML = 
-                "<div style='color: #ffffff; font-weight: 700; margin-bottom: 8px;'>Результаты экспресс-диагностики: " + data.domain + "</div>" +
-                "<div style='color: #ef4444; margin-bottom: 4px;'>• Риск [RED]: " + (data.critical_finding || "Не обнаружено критических нарушений") + "</div>" +
-                "<div style='color: #10b981; margin-bottom: 4px;'>• Факт [GREEN]: " + (data.compliance_fact || "Базовые заголовки в норме") + "</div>" +
-                "<div style='color: #38bdf8; margin-bottom: 8px;'>• Прогноз горизонта стабильности: " + (data.risk_horizon_weeks || 15) + " недель (H*)</div>" +
-                "<div style='color: #94a3b8; font-size: 12px;'>Скрытых замечаний: " + (data.hidden_findings_count || 0) + ". Для полного аудита выберите тариф ниже.</div>";
+            resDiv.innerHTML =
+                "<div style='color: #ffffff; font-weight: 700; margin-bottom: 8px;'>Результаты экспресс-диагностики: " + escapeHtml(data.domain) + "</div>" +
+                "<div style='color: #ef4444; margin-bottom: 4px;'>• Риск [RED]: " + escapeHtml(data.critical_finding || "Не обнаружено критических нарушений") + "</div>" +
+                "<div style='color: #10b981; margin-bottom: 4px;'>• Факт [GREEN]: " + escapeHtml(data.compliance_fact || "Базовые заголовки в норме") + "</div>" +
+                "<div style='color: #38bdf8; margin-bottom: 8px;'>• Прогноз горизонта стабильности: " + escapeHtml(data.risk_horizon_weeks || 15) + " недель (H*)</div>" +
+                "<div style='color: #94a3b8; font-size: 12px;'>Скрытых замечаний: " + escapeHtml(data.hidden_findings_count || 0) + ". Для полного аудита выберите тариф ниже.</div>";
             document.getElementById("leadDomain").value = domain;
         }} else {{
-            resDiv.innerHTML = "<span style='color: #ef4444;'>Ошибка: " + (data.error || "Не удалось завершить проверку") + "</span>";
+            resDiv.innerHTML = "<span style='color: #ef4444;'>Ошибка: " + escapeHtml(data.error || "Не удалось завершить проверку") + "</span>";
         }}
     }} catch (err) {{
         resDiv.innerHTML = "<span style='color: #ef4444;'>Сетевая ошибка при обращении к серверу аудита.</span>";
@@ -825,7 +847,7 @@ async function submitLead(e) {{
             status.innerHTML = "<span style='color: #10b981; font-weight: 700;'>✓ Заявка успешно принята! Наш специалист свяжется с вами в ближайшее время.</span>";
             document.getElementById("leadForm").reset();
         }} else {{
-            status.innerHTML = "<span style='color: #ef4444;'>Ошибка: " + (data.error || "Сбой отправки заявки") + "</span>";
+            status.innerHTML = "<span style='color: #ef4444;'>Ошибка: " + escapeHtml(data.error || "Сбой отправки заявки") + "</span>";
         }}
     }} catch (err) {{
         status.innerHTML = "<span style='color: #ef4444;'>Сетевая ошибка при отправке заявки.</span>";

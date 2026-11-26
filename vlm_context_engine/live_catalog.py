@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 import yaml
 
-from legal_sheaf.config import ADRADAR_DATA_DIR
+from legal_sheaf import config as legal_config
 
 logger = logging.getLogger("vlm_context_engine.live_catalog")
 
@@ -24,7 +24,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 DEFAULT_CATALOG_ENDPOINT = "https://openrouter.ai/api/v1/models"
 DEFAULT_KEY_ENDPOINT = "https://openrouter.ai/api/v1/key"
-DEFAULT_CACHE_FILE = ADRADAR_DATA_DIR / "cache" / "openrouter_models_catalog.json"
+DEFAULT_CACHE_FILE = legal_config.ADRADAR_DATA_DIR / "cache" / "openrouter_models_catalog.json"
 DEFAULT_PRIMARY_FREE_MODEL = "nvidia/nemotron-3.5-super-vl:free"
 DEFAULT_FALLBACK_FREE_MODELS = [
     "google/gemma-4-26b-a4b-it:free",
@@ -53,7 +53,20 @@ class LiveCatalogResolver:
         self.refresh_interval = settings.get("refresh_interval_seconds", 86400)
         self.catalog_endpoint = settings.get("catalog_endpoint", DEFAULT_CATALOG_ENDPOINT)
         self.key_endpoint = DEFAULT_KEY_ENDPOINT
-        self.cache_file = Path(settings.get("cache_file", str(DEFAULT_CACHE_FILE)))
+        env_data_dir = os.environ.get("ADRADAR_DATA_DIR", "").strip()
+        active_data_dir = Path(env_data_dir).resolve() if env_data_dir else Path(legal_config.ADRADAR_DATA_DIR).resolve()
+        raw_cache_file = settings.get("cache_file")
+        if raw_cache_file is None:
+            self.cache_file = active_data_dir / "cache" / "openrouter_models_catalog.json"
+        elif str(raw_cache_file).strip() == "":
+            self.cache_file = active_data_dir / "cache" / "openrouter_models_catalog.json"
+        else:
+            raw_str = str(raw_cache_file).replace("\\", "/")
+            if raw_str.lower().startswith("c:/adradardata/"):
+                rel_part = raw_str[len("c:/adradardata/"):]
+                self.cache_file = active_data_dir / rel_part
+            else:
+                self.cache_file = Path(raw_cache_file)
         self.cache_file.parent.mkdir(parents=True, exist_ok=True)
 
     def _find_config(self) -> Path:

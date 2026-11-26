@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-kb_dir = Path("c:/Users/ZVER/OneDrive/Документы/Аудит/legal_sheaf_verifier/legal_kb_seed")
+kb_dir = Path(__file__).resolve().parent.parent / "legal_kb_seed"
 
 # 100% Real verified acts of RF
 VERIFIED_FAS_AND_GOV_ACTS = [

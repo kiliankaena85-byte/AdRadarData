@@ -191,9 +191,9 @@ class LocalSheafPlusLaya:
         if bundle is not None:
             self.bundle = bundle
         else:
-            bundle_path = MODELS_CACHE_DIR / "champion_v2.bundle"
-            if not bundle_path.exists() and (ARTIFACTS_DIR / "champion_v2.bundle").exists():
-                bundle_path = ARTIFACTS_DIR / "champion_v2.bundle"
+            bundle_path = MODELS_CACHE_DIR / "champion_v3.bundle"
+            if not bundle_path.exists() and (ARTIFACTS_DIR / "champion_v3.bundle").exists():
+                bundle_path = ARTIFACTS_DIR / "champion_v3.bundle"
             if bundle_path.exists():
                 self.bundle = AdRadarBrainBundle.load(bundle_path)
             else:

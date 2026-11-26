@@ -130,6 +130,36 @@ FOREIGN_SIGNATURES = [
         "potential_fine_rub": "Предупреждение (действует мораторий на штрафы до 01.01.2029)",
         "remediation_note": "Заменить виджет Telegram на российские сервисы авторизации: VK ID, Госуслуги (ЕСИА), Яндекс ID, Сбер ID.",
     },
+    {
+        "name": "cloudflare-turnstile",
+        "category": "HIGH_LOCALIZATION_RISK",
+        "risk_level": "HIGH",
+        "pattern": re.compile(r"(?i)(?:challenges\.cloudflare\.com/turnstile|cf-turnstile)"),
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ (Передача сетевых и поведенческих идентификаторов пользователей РФ на зарубежные узлы Cloudflare Inc. в США)",
+        "koap_article": "ч. 8 ст. 13.11 КоАП РФ",
+        "potential_fine_rub": "от 1 000 000 до 6 000 000 руб. (со скидкой МСП по ст. 4.1.2 КоАП: от 500 000 до 3 000 000 руб.)",
+        "remediation_note": "Заменить Cloudflare Turnstile на Yandex SmartCaptcha или локальную российскую защиту от ботов.",
+    },
+    {
+        "name": "foreign-chat-crm-widget",
+        "category": "HIGH_LOCALIZATION_RISK",
+        "risk_level": "HIGH",
+        "pattern": re.compile(r"(?i)(?:widget\.intercom\.io|js\.intercomcdn\.com|client\.crisp\.chat|static\.zdassets\.com|js\.hs-scripts\.com|js\.hsforms\.net)"),
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ (Прямой сбор контактов и сообщений посетителей РФ в зарубежные облачные CRM/чат-виджеты Intercom/Crisp/Zendesk/HubSpot)",
+        "koap_article": "ч. 8 ст. 13.11 КоАП РФ",
+        "potential_fine_rub": "от 1 000 000 до 6 000 000 руб. (со скидкой МСП по ст. 4.1.2 КоАП: от 500 000 до 3 000 000 руб.)",
+        "remediation_note": "Заменить зарубежный онлайн-чат/CRM-виджет на локализованное в РФ решение.",
+    },
+    {
+        "name": "foreign-ad-pixel-tiktok-linkedin",
+        "category": "HIGH_LOCALIZATION_RISK",
+        "risk_level": "HIGH",
+        "pattern": re.compile(r"(?i)(?:analytics\.tiktok\.com|snap\.licdn\.com/li\.lms-analytics)"),
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ (Трансграничная передача рекламных и поведенческих идентификаторов пользователей РФ зарубежным трекинг-пикселям)",
+        "koap_article": "ч. 8 ст. 13.11 КоАП РФ",
+        "potential_fine_rub": "от 1 000 000 до 6 000 000 руб.",
+        "remediation_note": "Удалить зарубежные рекламные пиксели TikTok / LinkedIn с сайта.",
+    },
 ]
 
 # Personal data input field indicators
@@ -282,9 +312,47 @@ class Compliance152FZScanner:
                         )
                     )
 
-        # 3. Inspect <form> Tags for Personal Data Capture
+        # 3. Inspect <form> Tags AND Orphan SPA/Modal Lead Containers for Personal Data Capture
         soup = BeautifulSoup(clean_html, "html.parser")
-        form_elements = soup.find_all("form")
+        for code_or_tpl in soup(["script", "style", "pre", "code", "template", "noscript"]):
+            code_or_tpl.decompose()
+
+        form_elements = list(soup.find_all("form"))
+
+        # Detect SPA / React / Tilda / Bitrix modal lead containers (<div class="modal...">) without <form>
+        seen_spa_containers = set()
+        submit_btn_re = re.compile(
+            r"(?i)\b(?:отправить|заказать|оставить\s+заявку|получить|перезвон\w*|записаться|оформить|рассчитать|консультаци\w*)\b"
+        )
+        for orphan_inp in soup.find_all("input"):
+            if orphan_inp.find_parent("form") is not None:
+                continue
+            o_type = (orphan_inp.get("type") or "text").lower()
+            o_sig = f"{orphan_inp.get('name') or ''} {orphan_inp.get('placeholder') or ''} {orphan_inp.get('id') or ''}"
+            if not (o_type in ("tel", "email") or re.search(r"(?i)\b(?:phone|tel|mobile|телефон)\b", o_sig)):
+                continue
+            # Walk up max 4 levels to find a bounded container that also holds a submit/CTA button
+            cand = orphan_inp.parent
+            chosen_container = None
+            for _ in range(4):
+                if cand is None or getattr(cand, "name", None) in (None, "body", "html", "[document]"):
+                    break
+                c_inputs = cand.find_all(["input", "textarea", "select"])
+                if 1 <= len(c_inputs) <= 8:
+                    btns = cand.find_all(["button", "a", "input"])
+                    has_cta_btn = any(
+                        (b.name == "input" and (b.get("type") or "").lower() == "submit")
+                        or submit_btn_re.search(b.get_text(" ", strip=True) or (b.get("value") or ""))
+                        for b in btns
+                    )
+                    if has_cta_btn:
+                        chosen_container = cand
+                        break
+                cand = cand.parent
+            if chosen_container is not None and id(chosen_container) not in seen_spa_containers:
+                seen_spa_containers.add(id(chosen_container))
+                form_elements.append(chosen_container)
+
         inspected_forms: List[FormInspectionResult] = []
 
         for idx, form in enumerate(form_elements):
@@ -356,7 +424,19 @@ class Compliance152FZScanner:
                 inp_id = inp.get("id") or ""
 
                 if inp_type == "checkbox":
-                    surrounding_text = inp.parent.get_text() if inp.parent else ""
+                    parent_txt = inp.parent.get_text(" ", strip=True) if inp.parent else ""
+                    grandparent_txt = (
+                        inp.parent.parent.get_text(" ", strip=True)
+                        if (inp.parent and inp.parent.parent and len(parent_txt) < 20)
+                        else ""
+                    )
+                    linked_lbl_txt = ""
+                    if inp_id:
+                        lbl_tag = form.find("label", attrs={"for": inp_id}) or soup.find("label", attrs={"for": inp_id})
+                        if lbl_tag:
+                            linked_lbl_txt = lbl_tag.get_text(" ", strip=True)
+                    aria_lbl = inp.get("aria-label") or ""
+                    surrounding_text = " ".join(x for x in (parent_txt, linked_lbl_txt, grandparent_txt, aria_lbl) if x)
                     inp_attrs = f"{inp_name} {inp_id} {surrounding_text}"
                     if CONSENT_TEXT_REGEX.search(inp_attrs):
                         has_consent_checkbox = True

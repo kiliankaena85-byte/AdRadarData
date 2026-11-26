@@ -123,6 +123,18 @@ TIER_SIGNATURE_REGISTRY: Dict[str, Dict[str, Any]] = {
         "legal_basis": "ч. 16 ст. 14.3 КоАП РФ, Приказ РКН № 68",
         "description": "Суррогатная пометка: указано 'Реклама', но отсутствует токен erid или ИНН рекламодателя",
     },
+    "partial_erid_missing_on_link": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "14.3_part_16",
+        "legal_basis": "ч. 16 ст. 14.3 КоАП РФ, ч. 17 ст. 18.1 38-ФЗ",
+        "description": "Частичная маркировка: в публикации с несколькими рекламными ссылками у части коммерческих или партнерских ссылок отсутствует либо поврежден идентификатор erid",
+    },
+    "banned_or_special_regime": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "14.3_part_1",
+        "legal_basis": "ст. 7, ст. 24, ст. 28 38-ФЗ, ч. 1 ст. 14.3 КоАП РФ",
+        "description": "Продвижение запрещенного объекта рекламирования (VPN, криптообмен/биржи, казино) или специального режима без обязательных дисклеймеров",
+    },
     "superlative_without_asterisk": {
         "tier": EnforcementTier.RED_REAL_FINE,
         "koap_article": "14.3_part_1",
@@ -164,6 +176,54 @@ TIER_SIGNATURE_REGISTRY: Dict[str, Dict[str, Any]] = {
         "koap_article": "13.11_part_1",
         "legal_basis": "ч. 1, 5 ст. 13.11 КоАП РФ, ст. 12 152-ФЗ",
         "description": "Сбор персональных данных граждан РФ через Google Forms с трансграничной передачей на серверы в США",
+    },
+    "google-analytics": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Прямой сбор сетевых идентификаторов граждан РФ в Google Analytics на серверы США без первичной локализации в РФ",
+    },
+    "google-tag-manager": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Активный зарубежный контейнер Google Tag Manager с передачей телеметрии посетителей за пределы РФ",
+    },
+    "google-recaptcha": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Передача поведенческих и сетевых идентификаторов пользователей РФ в Google reCAPTCHA (США) без локализации",
+    },
+    "foreign-tracker-meta-hotjar": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Трансграничная передача трекинговых данных посетителей зарубежным аналитическим/чат-сервисам (Meta/Hotjar/Clarity/Tawk)",
+    },
+    "cloudflare-turnstile": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Передача сетевых и поведенческих идентификаторов пользователей РФ на зарубежные узлы Cloudflare Turnstile",
+    },
+    "foreign-chat-crm-widget": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Сбор контактов и сообщений посетителей РФ в зарубежный облачный чат/CRM-виджет (Intercom/Crisp/Zendesk/HubSpot)",
+    },
+    "foreign-ad-pixel-tiktok-linkedin": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_8",
+        "legal_basis": "ч. 5 ст. 18 152-ФЗ, ч. 8 ст. 13.11 КоАП РФ",
+        "description": "Трансграничная передача рекламных идентификаторов пользователей РФ зарубежным пикселям (TikTok/LinkedIn)",
+    },
+    "bundled-pd-and-advertising-consent": {
+        "tier": EnforcementTier.RED_REAL_FINE,
+        "koap_article": "13.11_part_2",
+        "legal_basis": "ч. 2 ст. 13.11 КоАП РФ, ч. 1 ст. 14.3 КоАП РФ, ст. 9 152-ФЗ, 156-ФЗ",
+        "description": "Объединение согласия на обработку персональных данных и согласия на рекламные рассылки в единый чекбокс",
     },
     "foreign_widget_data_leak": {
         "tier": EnforcementTier.RED_REAL_FINE,
@@ -298,6 +358,12 @@ TIER_SIGNATURE_REGISTRY: Dict[str, Dict[str, Any]] = {
         "koap_article": "13.11_part_1",
         "legal_basis": "ч. 1 ст. 18.1 152-ФЗ, ст. 49 248-ФЗ",
         "description": "Счетчик Яндекс.Метрики установлен, но не раскрыт в Политике конфиденциальности (требование 248-ФЗ)",
+    },
+    "rkn_undeclared_cross_border_transfer": {
+        "tier": EnforcementTier.ORANGE_REGULATORY_DEMAND,
+        "koap_article": "13.11_part_1",
+        "legal_basis": "ст. 12 152-ФЗ, ч. 1 ст. 13.11 КоАП РФ",
+        "description": "Фактическая передача данных на зарубежные узлы трекеров/виджетов при отметке 'Трансграничная передача: Нет' в реестре РКН",
     },
     "commercial_b2c_foreign_words_168fz": {
         "tier": EnforcementTier.ORANGE_REGULATORY_DEMAND,

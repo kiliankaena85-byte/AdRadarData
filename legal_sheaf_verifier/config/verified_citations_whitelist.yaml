@@ -20,6 +20,7 @@ verified_agency_letters:
   - "КТ/90922/22"
 
 verified_koap_articles:
+  - "1.5"
   - "1.7"
   - "4.1.1"
   - "4.1.2"
@@ -34,6 +35,7 @@ verified_koap_articles:
   - "14.8"
   - "20.3"
   - "24.5"
+  - "26.2"
 
 verified_federal_laws:
   - "38-ФЗ"
@@ -50,6 +52,7 @@ verified_federal_laws:
 
 verified_koap_and_laws:
   koap_articles:
+    - "1.5"
     - "1.7"
     - "4.1.1"
     - "4.1.2"
@@ -64,6 +67,7 @@ verified_koap_and_laws:
     - "14.8"
     - "20.3"
     - "24.5"
+    - "26.2"
   federal_laws:
     - "38-ФЗ"
     - "152-ФЗ"

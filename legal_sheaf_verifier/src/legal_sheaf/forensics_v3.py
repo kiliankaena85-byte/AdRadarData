@@ -61,7 +61,8 @@ TRUSTED_RUSSIAN_SCRIPT_DOMAINS: Set[str] = {
 STATIC_CDNS: Set[str] = {
     "jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
     "fonts.googleapis.com", "fonts.gstatic.com", "ajax.googleapis.com",
-    "code.jquery.com", "cdn.tailwindcss.com", "bootstrapcdn.com"
+    "code.jquery.com", "cdn.tailwindcss.com", "bootstrapcdn.com",
+    "tildacdn.com", "tildacdn.info", "tildacdn.pro", "tilda.ws",
 }
 
 IGNORED_DOCS_AND_STANDARDS_DOMAINS: Set[str] = {
@@ -76,11 +77,14 @@ def extract_root_domain(domain: str) -> str:
     """Extracts second-level domain name (e.g. 'c3.ru' from 'c3.c3.ru' or 'athenachat.ai' from 'ru.athenachat.ai')."""
     clean = domain.strip().lower()
     clean = re.sub(r"^https?://", "", clean).split("/")[0].split(":")[0]
+    clean = clean.strip("()[]{},;:'\"<>?`~*!@#$%^&+=|\\/.")
     if clean.startswith("www."):
         clean = clean[4:]
     parts = clean.split(".")
-    if len(parts) <= 2:
-        return clean
+    if len(parts) < 2:
+        return ""
+    if not all(re.match(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$", p) for p in parts):
+        return ""
     # Handle known 2-level TLDs (.co.uk, .com.ru, etc.)
     if parts[-2] in ("com", "net", "org", "co", "spb", "msk", "gov", "edu") and len(parts) >= 3:
         return ".".join(parts[-3:])
@@ -512,6 +516,53 @@ async def inspect_external_js_endpoints(
 
 
 # -----------------------------------------------------------------------------
+# HTML / TEXT EVIDENCE HELPERS
+# -----------------------------------------------------------------------------
+
+_META_SOCIAL_TAG_RE = re.compile(r"(?i)(?:instagram|facebook|fb[-_]icon|insta[-_]icon)")
+_META_ICON_MARKER_RE = re.compile(r"(?i)(?:icon|logo|social|soc[-_]|fb[-_]icon|insta[-_]icon|\.svg(?:\?|$))")
+_META_EDITORIAL_MEDIA_RE = re.compile(r"(?i)(?:/(?:blog|news|articles?|posts?|uploads/blog|static/blog)/|(?:cover|thumb|preview))")
+_META_ICON_OR_SVG_RE = re.compile(r"(?i)(?:icon|logo|\.svg(?:\?|$))")
+
+PHOENIX_IGNORED_BRAND_NAMES: Set[str] = {
+    "бегет", "beget", "яндекс", "yandex", "vk", "вк", "вконтакте", "reg.ru", "рег.ру",
+    "таймвеб", "timeweb", "селектел", "selectel", "битрикс", "битрикс24", "1с-битрикс",
+    "тильда", "tilda", "сбер", "сбербанк", "тинькофф", "т-банк", "альфа-банк",
+    "юмани", "юкасса", "yookassa", "робокасса", "robokassa", "живой сайт", "jivosite",
+    "google", "гугл", "мтс", "мегафон", "билайн", "ростелеком", "клауд", "cloud",
+}
+
+
+def _strip_html_tags(raw: str) -> str:
+    """Strips HTML markup tags and collapses excess whitespace."""
+    if not raw:
+        return ""
+    cleaned = re.sub(r"<[^>]+>", "", str(raw))
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _html_to_plain_text(raw: str) -> str:
+    """Converts HTML payload into normalized plain text while preserving non-HTML strings."""
+    if not raw:
+        return ""
+    if "<" in raw and ">" in raw:
+        return BeautifulSoup(raw, "html.parser").get_text(separator=" ", strip=True)
+    return re.sub(r"\s+", " ", raw).strip()
+
+
+def _extract_quote_snippet(text: str, start: int, end: int, radius: int = 80) -> str:
+    """Extracts a compact plain-text window around [start:end] for witness evidence."""
+    if not text:
+        return ""
+    left = max(0, start - radius)
+    right = min(len(text), end + radius)
+    snippet = re.sub(r"\s+", " ", text[left:right]).strip()
+    if len(snippet) > 160:
+        snippet = snippet[:157] + "..."
+    return snippet
+
+
+# -----------------------------------------------------------------------------
 # 2. SOCIAL NETWORKS: META EXTREMIST VS BLOCKED RULE
 # -----------------------------------------------------------------------------
 
@@ -521,36 +572,53 @@ def meta_extremist_vs_blocked_rule(full_raw_html: str) -> List[Dict[str, Any]]:
     - LinkedIn, X/Twitter: NOT an extremist violation (blocked, but not extremist under 20.3 KoAP).
     - WhatsApp* / Instagram* in text with a Meta banned/extremist footnote in full HTML -> CLEAN (0 violations).
     - Triggers ч. 1 ст. 20.3 КоАП РФ ONLY if:
-      (a) Graphic symbolism/icon of Instagram/Facebook (svg/img/icon);
-      (b) Direct link <a href="...instagram.com/..."> to profile without footnote or prohibited link.
+      (a) Direct link <a href="...instagram.com/..."> or <a href="...facebook.com/...">;
+      (b) Graphic social icon/logo (<svg>/<i> class/id or explicit icon/logo <img>, excluding editorial blog covers).
     """
     findings: List[Dict[str, Any]] = []
 
-    # 1. Check if Meta footnote exists anywhere in the full HTML
-    meta_disclaimer_pattern = re.compile(
-        r"(?i)(?:"
-        r"деятельность\s+(?:организации\s+)?meta\b.*?(?:запрещен|экстремист)"
-        r"|meta\b.*?(?:признан[а-я]*|запрещен[а-я]*|экстремист)"
-        r"|организаци[а-я]*\s+meta\b.*?(?:запрещен|экстремист)"
-        r"|(?:instagram|facebook|whatsapp).*?meta.*?(?:запрещен|экстремист)"
-        r")"
-    )
-    has_meta_disclaimer = bool(meta_disclaimer_pattern.search(full_raw_html))
-
-    # 2. Check for graphic symbolism / icons of Instagram / Facebook
-    icon_pattern = re.compile(
-        r'(?i)(?:<svg[^>]+(?:class|id|data-icon)=["\'][^"\']*(?:instagram|facebook|fb-icon|insta-icon)[^"\']*["\']|<img[^>]+(?:src|alt|title)=["\'][^"\']*(?:instagram|facebook|fb-icon|insta-icon)[^"\']*["\']|<i[^>]+class=["\'][^"\']*(?:fa-instagram|fa-facebook|icon-instagram|icon-facebook)[^"\']*["\'])'
-    )
-    icon_match = icon_pattern.search(full_raw_html)
-
-    # 3. Check for direct profile links to Instagram / Facebook
     link_pattern = re.compile(
-        r'(?i)<a\s+[^>]*href=["\']https?://(?:www\.)?(?:instagram\.com|facebook\.com)/[^"\']+["\']'
+        r'(?i)<a\s+[^>]*href=["\']https?://(?:www\.)?(?:instagram\.com|facebook\.com)/[^"\']*["\']'
     )
     link_match = link_pattern.search(full_raw_html)
 
-    if icon_match or link_match:
-        matched_snippet = (icon_match.group(0) if icon_match else link_match.group(0))[:120]
+    svg_i_pattern = re.compile(
+        r'(?i)(?:<svg[^>]+(?:class|id|data-icon)=["\'][^"\']*(?:instagram|facebook|fb-icon|insta-icon)[^"\']*["\']'
+        r'|<i[^>]+class=["\'][^"\']*(?:fa-instagram|fa-facebook|icon-instagram|icon-facebook)[^"\']*["\'])'
+    )
+    svg_i_match = svg_i_pattern.search(full_raw_html)
+
+    img_icon_snippet: Optional[str] = None
+    if not link_match and not svg_i_match and "<img" in full_raw_html.lower():
+        soup = BeautifulSoup(full_raw_html, "html.parser")
+        for img in soup.find_all("img"):
+            src = str(img.get("src") or "")
+            alt = str(img.get("alt") or "")
+            title = str(img.get("title") or "")
+            cls = " ".join(img.get("class") or []) if isinstance(img.get("class"), list) else str(img.get("class") or "")
+            id_attr = str(img.get("id") or "")
+            combined_meta = f"{src} {alt} {title} {cls} {id_attr}"
+            if not _META_SOCIAL_TAG_RE.search(combined_meta):
+                continue
+
+            parent_a = img.find_parent("a", href=True)
+            if parent_a and re.search(r"(?i)https?://(?:www\.)?(?:instagram\.com|facebook\.com)/", str(parent_a.get("href") or "")):
+                img_icon_snippet = str(img)[:120]
+                break
+
+            has_icon_marker = bool(_META_ICON_MARKER_RE.search(f"{src} {cls} {id_attr}"))
+            is_editorial_cover = bool(_META_EDITORIAL_MEDIA_RE.search(src)) and not _META_ICON_OR_SVG_RE.search(f"{cls} {id_attr}") and not src.lower().endswith(".svg")
+            if has_icon_marker and not is_editorial_cover:
+                img_icon_snippet = str(img)[:120]
+                break
+
+    if link_match or svg_i_match or img_icon_snippet:
+        if link_match:
+            matched_snippet = link_match.group(0)[:120]
+        elif svg_i_match:
+            matched_snippet = svg_i_match.group(0)[:120]
+        else:
+            matched_snippet = img_icon_snippet or "Instagram/Facebook"
         findings.append({
             "signature": "extremist_meta_social_links_20_3",
             "tier": "RED_REAL_FINE",
@@ -585,20 +653,23 @@ def policy_and_terms_forensics(
     2. implicit-browse-consent-invalid: 'Использование сайта означает согласие' (156-FZ / ст. 9 152-FZ).
     3. analytics-denied-as-pd: 'Техническая аналитика / cookies не являются ПД' (ст. 13.11 КоАП РФ, Case 05-1297/422/2022).
     4. hidden-subprocessors-list: 'Перечень третьих лиц предоставляется по запросу' (ч. 3 ст. 6, ст. 18.1 152-FZ).
-    5. illegal-no-refund-b2c-clause: 'Оплаченные суммы возврату не подлежат' in B2C oferta (ст. 16, 32 ЗоЗПП -> 14.8(2) KoAP)
-       or missing physical address (ч. 2 ст. 10 149-FZ).
-    6. unprotected-affiliate-program: Affiliate/referral program without erid/ORD marking requirements (ч. 16 ст. 14.3 KoAP).
+    5. illegal-no-refund-b2c-clause: Explicit non-refundable / no-recalculation clause in B2C oferta (ст. 16, 32 ЗоЗПП -> ч. 2 ст. 14.8 КоАП).
+    6. unprotected-affiliate-program: Affiliate/referral program without erid/ORD marking requirements (ч. 16 ст. 14.3 КоАП).
     """
     if not policy_html and policy_text:
         policy_html = policy_text
     findings: List[Dict[str, Any]] = []
     clean_domain = audited_domain.strip().lower()
 
+    policy_plain = _html_to_plain_text(policy_html)
+    oferta_plain = _html_to_plain_text(oferta_html)
+    site_plain = _html_to_plain_text(site_html)
+
     # 1. policy-domain-mismatch
-    if policy_html:
-        dom_matches = re.findall(r"(?i)(?:веб-сайта?|сайта?|ресурса?)\s+https?://(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", policy_html)
-        if dom_matches:
-            target_in_policy = dom_matches[0].lower().strip()
+    if policy_plain:
+        dom_match = re.search(r"(?i)(?:веб-сайта?|сайта?|ресурса?)\s+(https?://(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}))", policy_plain)
+        if dom_match:
+            target_in_policy = dom_match.group(2).lower().strip()
             if target_in_policy != clean_domain and clean_domain not in target_in_policy:
                 findings.append({
                     "signature": "policy_domain_mismatch_paradox",
@@ -611,70 +682,123 @@ def policy_and_terms_forensics(
                     ),
                     "referenced_domain": target_in_policy,
                     "audited_domain": clean_domain,
+                    "source_page_type": "policy",
+                    "quote": dom_match.group(1),
+                    "raw_snippet": _extract_quote_snippet(policy_plain, dom_match.start(), dom_match.end()),
                 })
 
     # Check untranslated English links under forms
-    if re.search(r'(?i)href=["\'][^"\']*/(?:terms|terms-of-service|privacy-policy)["\'][^>]*>\s*(?:terms\s+of\s+service|privacy\s+policy)\s*<', site_html):
+    en_link_match = re.search(
+        r'(?i)<a\s+[^>]*href=["\'][^"\']*/(?:terms|terms-of-service|privacy-policy)["\'][^>]*>\s*(?:terms\s+of\s+service|privacy\s+policy)\s*</a>',
+        site_html,
+    )
+    if not en_link_match:
+        en_link_match = re.search(
+            r'(?i)href=["\'][^"\']*/(?:terms|terms-of-service|privacy-policy)["\'][^>]*>\s*(?:terms\s+of\s+service|privacy\s+policy)\s*<',
+            site_html,
+        )
+    if en_link_match:
         findings.append({
             "signature": "policy_domain_mismatch_paradox",
             "tier": "RED_REAL_FINE",
             "legal_basis": "ч. 3 ст. 13.11 КоАП РФ, ч. 2 ст. 18.1 152-ФЗ",
             "description": "Ссылки на юридические документы под формой ведут на непереведенные англоязычные Terms/Policy",
+            "source_page_type": "home",
+            "quote": _strip_html_tags(en_link_match.group(0)) or "Terms of Service / Privacy Policy",
+            "raw_snippet": en_link_match.group(0)[:160],
         })
 
-    combined_policy = (policy_html + " " + site_html).lower()
+    combined_source = policy_plain if policy_plain else site_plain
+    combined_source_type = "policy" if policy_plain else "home"
+
+    def _search_policy_or_site(pattern: str) -> Tuple[Optional[re.Match], str, str]:
+        if policy_plain:
+            m = re.search(pattern, policy_plain)
+            if m:
+                return m, policy_plain, "policy"
+        if site_plain:
+            m = re.search(pattern, site_plain)
+            if m:
+                return m, site_plain, "home"
+        return None, combined_source, combined_source_type
 
     # 2. implicit-browse-consent-invalid
-    if re.search(r"(?i)(?:использование\s+сайта\s+(?:означает|является|подтверждает)|продолжая\s+использование\s+сайта|факт\s+использования\s+сайта|просмотр\s+сайта\s+(?:означает|подтверждает))", combined_policy):
+    m_imp, txt_imp, src_imp = _search_policy_or_site(
+        r"(?i)(?:использование\s+сайта\s+(?:означает|является|подтверждает)|продолжая\s+использование\s+сайта|факт\s+использования\s+сайта|просмотр\s+сайта\s+(?:означает|подтверждает))"
+    )
+    if m_imp:
         findings.append({
             "signature": "implicit_browse_consent_invalid",
             "tier": "RED_REAL_FINE",
             "legal_basis": "ч. 2 ст. 13.11 КоАП РФ, ст. 9 152-ФЗ, 156-ФЗ",
             "description": "Презумпция согласия при просмотре сайта ничтожна (нарушение ст. 9 152-ФЗ и 156-ФЗ)",
+            "source_page_type": src_imp,
+            "quote": m_imp.group(0),
+            "raw_snippet": _extract_quote_snippet(txt_imp, m_imp.start(), m_imp.end()),
         })
 
     # 3. analytics-denied-as-pd
-    if re.search(r"(?i)(?:техническ(?:ая|ие)\s+(?:информация|данные)[^.\n]{0,80}(?:не\s+явля(?:ются|ется)|не\s+относят?ся\s+к)\s+персональн|файлы\s+cookies?\s+не\s+являются\s+персональными|cookies?\s+не\s+явля(?:ются|ется)\s+персональн)", combined_policy):
+    m_ana, txt_ana, src_ana = _search_policy_or_site(
+        r"(?i)(?:техническ(?:ая|ие)\s+(?:информация|данные)[^.\n]{0,80}(?:не\s+явля(?:ются|ется)|не\s+относят?ся\s+к)\s+персональн|файлы\s+cookies?\s+не\s+являются\s+персональными|cookies?\s+не\s+явля(?:ются|ется)\s+персональн)"
+    )
+    if m_ana:
         findings.append({
             "signature": "analytics_denied_as_pd",
             "tier": "RED_REAL_FINE",
             "legal_basis": "ч. 1 ст. 13.11 КоАП РФ, ст. 3 152-ФЗ, Постановление мирового судьи с/у № 422 Таганского района г. Москвы по делу № 05-1297/422/2022",
             "description": "Отказ признавать техническую аналитику и cookies персональными данными (ст. 13.11 КоАП РФ, прецедент № 05-1297/422/2022)",
+            "source_page_type": src_ana,
+            "quote": m_ana.group(0),
+            "raw_snippet": _extract_quote_snippet(txt_ana, m_ana.start(), m_ana.end()),
         })
 
     # 4. hidden-subprocessors-list
-    if re.search(r"(?i)(?:перечень|список)\s+(?:субобработчиков|третьих\s+лиц|партнеров)[^.\n]{0,80}(?:предоставляется|направляется|доступен|может\s+быть\s+предоставлен)\s+по\s+(?:письменному\s+)?запросу", combined_policy):
+    m_sub, txt_sub, src_sub = _search_policy_or_site(
+        r"(?i)(?:перечень|список)\s+(?:субобработчиков|третьих\s+лиц|партнеров)[^.\n]{0,80}(?:предоставляется|направляется|доступен|может\s+быть\s+предоставлен)\s+по\s+(?:письменному\s+)?запросу"
+    )
+    if m_sub:
         findings.append({
             "signature": "hidden_subprocessors_list",
             "tier": "ORANGE_REGULATORY_DEMAND",
             "legal_basis": "ч. 1 ст. 13.11 КоАП РФ, ч. 3 ст. 6, ст. 18.1 152-ФЗ",
             "description": "Сокрытие перечня субобработчиков: отсылка к предоставлению списка третьих лиц 'по запросу'",
+            "source_page_type": src_sub,
+            "quote": m_sub.group(0),
+            "raw_snippet": _extract_quote_snippet(txt_sub, m_sub.start(), m_sub.end()),
         })
 
-    # 5. illegal-no-refund-b2c-clause in Oferta
-    if oferta_html:
-        combined_oferta = oferta_html.lower()
-        has_no_refund = bool(re.search(r"(?i)(?:оплаченные\s+суммы\s+возврату\s+не\s+подлежат|не\s+влечет\s+(?:перерасчета|возврата)|возврат\s+денежных\s+средств\s+не\s+производится|услуга\s+считается\s+оказанной\s+в\s+момент\s+оплаты)", combined_oferta))
-        has_physical_address = bool(re.search(r"(?i)(?:адрес\s*(?:местонахождения|юр(?:идический)?|для\s+корреспонденции)?\s*[:\s]+(?:\d{6}|\bг\.\s*[а-я]+|\bул\.\s*[а-я]+))", combined_oferta))
-
-        if has_no_refund or not has_physical_address:
+    # 5. illegal-no-refund-b2c-clause in Oferta (STRICT: real clause match only)
+    if oferta_plain:
+        m_no_refund = re.search(
+            r"(?i)(?:оплаченные\s+суммы\s+возврату\s+не\s+подлежат|не\s+влечет\s+(?:перерасчета|возврата)|возврат\s+денежных\s+средств\s+не\s+производится|услуга\s+считается\s+оказанной\s+в\s+момент\s+оплаты)",
+            oferta_plain,
+        )
+        if m_no_refund:
             findings.append({
                 "signature": "illegal_no_refund_b2c_clause",
                 "tier": "RED_REAL_FINE",
                 "legal_basis": "ст. 16, ст. 32 Закона РФ № 2300-1 (ЗоЗПП), ч. 2 ст. 14.8 КоАП РФ, ч. 2 ст. 10 149-ФЗ",
-                "description": "Ущемление прав потребителей в B2C-оферте: условие о невозвратности оплаты / отказ от перерасчета либо сокрытие адреса",
+                "description": "Ущемление прав потребителей в B2C-оферте: условие о невозвратности оплаты / отказ от перерасчета",
+                "source_page_type": "oferta",
+                "quote": m_no_refund.group(0),
+                "raw_snippet": _extract_quote_snippet(oferta_plain, m_no_refund.start(), m_no_refund.end()),
             })
 
     # 6. unprotected-affiliate-program
-    if re.search(r"(?i)(?:/affiliate|/partners|/referral|реферальн[а-я]+\s+программ|партнерск[а-я]+\s+программ)", site_html):
-        mentions_reward = bool(re.search(r"(?i)(?:комисси[яеи]\s+за\s+переход|реферальн[а-я]+\s+вознаграждени|выплаты\s+за\s+каждого|партнерск[а-я]+\s+процент)", site_html))
-        mentions_erid = bool(re.search(r"(?i)(?:erid|маркировк|орд|токен)", site_html))
-        if mentions_reward and not mentions_erid:
+    aff_src = site_plain or site_html
+    m_aff = re.search(r"(?i)(?:/affiliate|/partners|/referral|реферальн[а-я]+\s+программ|партнерск[а-я]+\s+программ)", site_html)
+    if m_aff:
+        m_rew = re.search(r"(?i)(?:комисси[яеи]\s+за\s+переход|реферальн[а-я]+\s+вознаграждени|выплаты\s+за\s+каждого|партнерск[а-я]+\s+процент)", aff_src)
+        mentions_erid = bool(re.search(r"(?i)(?:erid|маркировк|орд|токен)", aff_src))
+        if m_rew and not mentions_erid:
             findings.append({
                 "signature": "unprotected_affiliate_program",
                 "tier": "RED_REAL_FINE",
                 "legal_basis": "ч. 16 ст. 18.1 Федерального закона № 38-ФЗ 'О рекламе', ч. 16 ст. 14.3 КоАП РФ",
                 "description": "Партнерская/реферальная программа с вознаграждением за переходы без требования маркировки erid",
+                "source_page_type": "home",
+                "quote": m_rew.group(0),
+                "raw_snippet": _extract_quote_snippet(aff_src, m_rew.start(), m_rew.end()),
             })
 
     return findings
@@ -722,10 +846,12 @@ async def resolve_phoenix_clones_in_fns(
     org_names: List[str],
     city_hint: Optional[str] = None,
     client: Optional[httpx.AsyncClient] = None,
+    site_inns: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Searches bo.nalog.gov.ru for organization names to detect 'Phoenix Clones':
     Same brand/legal name where predecessor is INACTIVE (liquidated) and successor is ACTIVE.
+    Requires corroboration against site INNs (when known) or exact name + city match to prevent homonym/hoster false positives.
     """
     close_c = False
     if client is None:
@@ -738,14 +864,27 @@ async def resolve_phoenix_clones_in_fns(
         )
         close_c = True
 
+    normalized_site_inns: Optional[Set[str]] = (
+        {re.sub(r"\D", "", s) for s in site_inns if s}
+        if site_inns is not None
+        else None
+    )
+
     phoenix_findings: List[Dict[str, Any]] = []
     seen_names: Set[str] = set()
 
     for raw_name in sorted(list(set(org_names))):
-        clean = re.sub(r'[\'\"«»]|\b(?:ООО|ОАО|ЗАО|ИП|Общество с ограниченной ответственностью)\b', '', raw_name, flags=re.IGNORECASE).strip()
-        if len(clean) < 3 or clean in seen_names:
+        plain_name = _strip_html_tags(raw_name)
+        clean = re.sub(r'[\'\"«»]|\b(?:ООО|ОАО|ЗАО|ПАО|НАО|ИП|Общество с ограниченной ответственностью)\b', '', plain_name, flags=re.IGNORECASE).strip()
+        clean_lower = clean.lower()
+        if (
+            len(clean) < 4
+            or clean_lower in seen_names
+            or clean_lower in PHOENIX_IGNORED_BRAND_NAMES
+            or any(ign in clean_lower.split() for ign in PHOENIX_IGNORED_BRAND_NAMES)
+        ):
             continue
-        seen_names.add(clean)
+        seen_names.add(clean_lower)
 
         try:
             enc_query = urllib.parse.quote(clean)
@@ -756,12 +895,17 @@ async def resolve_phoenix_clones_in_fns(
                 items = data.get("content", [])
                 inactive_entities: List[Dict[str, Any]] = []
                 active_entities: List[Dict[str, Any]] = []
-                clean_target = clean.lower().replace(" ", "")
+                clean_target = clean_lower.replace(" ", "")
 
                 for org in items:
-                    raw_sname = org.get("shortName") or org.get("fullName") or ""
-                    clean_sname = re.sub(r'[\'\"«»]|\b(?:ООО|ОАО|ЗАО|ИП|Общество с ограниченной ответственностью)\b', '', raw_sname, flags=re.IGNORECASE).strip().lower().replace(" ", "")
-                    if clean_target not in clean_sname and clean_sname not in clean_target:
+                    raw_sname = _strip_html_tags(org.get("shortName") or org.get("fullName") or "")
+                    clean_sname = re.sub(
+                        r'[\'\"«»]|\b(?:ООО|ОАО|ЗАО|ПАО|НАО|ИП|Общество с ограниченной ответственностью)\b',
+                        '',
+                        raw_sname,
+                        flags=re.IGNORECASE,
+                    ).strip().lower().replace(" ", "")
+                    if not clean_sname or clean_sname != clean_target:
                         continue
                     inn_org = org.get("inn", "")
                     clean_inn = re.sub(r"\D", "", inn_org)
@@ -772,7 +916,7 @@ async def resolve_phoenix_clones_in_fns(
                     ent_info = {
                         "inn": clean_inn,
                         "ogrn": org.get("ogrn"),
-                        "name": org.get("shortName") or org.get("fullName"),
+                        "name": raw_sname,
                         "status": st,
                         "status_date": org.get("statusDate"),
                         "city": org.get("city"),
@@ -785,22 +929,41 @@ async def resolve_phoenix_clones_in_fns(
                         active_entities.append(ent_info)
 
                 if inactive_entities and active_entities:
-                    inact = inactive_entities[0]
-                    act = active_entities[0]
-                    phoenix_findings.append({
-                        "signature": "phoenix_clone_detected",
-                        "tier": "RED_REAL_FINE",
-                        "legal_basis": "ч. 2 ст. 14.7 КоАП РФ, п. 2, 3 ч. 3 ст. 5 38-ФЗ",
-                        "description": (
-                            f"Обнаружен паттерн компании-феникса для бренда '{clean}': "
-                            f"предшественник ООО (ИНН {inact['inn']}, ОГРН {inact['ogrn']}) ЛИКВИДИРОВАН ({inact.get('status_date')}), "
-                            f"а деятельность ведется от лица компании-клона (ИНН {act['inn']}, ОГРН {act['ogrn']}, "
-                            f"выручка {act.get('revenue_rub', 0):,} руб.). Использование регалий и патентов ликвидированного "
-                            f"лица образует состав недостоверной рекламы и обмана потребителей."
-                        ),
-                        "predecessor": inact,
-                        "successor": act,
-                    })
+                    matched_pair: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+                    for inact in inactive_entities:
+                        for act in active_entities:
+                            if normalized_site_inns:
+                                # Strict match: one of the companies MUST match an INN actually extracted from the audited site
+                                if inact["inn"] not in normalized_site_inns and act["inn"] not in normalized_site_inns:
+                                    continue
+                            else:
+                                inact_city = str(inact.get("city") or "").strip().lower()
+                                act_city = str(act.get("city") or "").strip().lower()
+                                if inact_city and act_city and inact_city != act_city:
+                                    continue
+                                if city_hint and act_city and city_hint.strip().lower() != act_city:
+                                    continue
+                            matched_pair = (inact, act)
+                            break
+                        if matched_pair:
+                            break
+
+                    if matched_pair:
+                        inact, act = matched_pair
+                        phoenix_findings.append({
+                            "signature": "phoenix_clone_detected",
+                            "tier": "RED_REAL_FINE",
+                            "legal_basis": "ч. 2 ст. 14.7 КоАП РФ, п. 2, 3 ч. 3 ст. 5 38-ФЗ",
+                            "description": (
+                                f"Обнаружен паттерн компании-феникса для бренда '{clean}': "
+                                f"предшественник ООО (ИНН {inact['inn']}, ОГРН {inact['ogrn']}) ЛИКВИДИРОВАН ({inact.get('status_date')}), "
+                                f"а деятельность ведется от лица компании-клона (ИНН {act['inn']}, ОГРН {act['ogrn']}, "
+                                f"выручка {act.get('revenue_rub', 0):,} руб.). Использование регалий и патентов ликвидированного "
+                                f"лица образует состав недостоверной рекламы и обмана потребителей."
+                            ),
+                            "predecessor": inact,
+                            "successor": act,
+                        })
         except Exception as e:
             logger.debug(f"bo.nalog search error for {clean}: {e}")
 
@@ -820,7 +983,7 @@ async def detect_regalia_and_pdf_chronology_mismatch(
     """
     ч. 2 ст. 14.7 КоАП РФ, п. 2, 3 ч. 3 ст. 5 38-ФЗ.
     1. Extracts creation year from active OGRN (2000 + int(ogrn[1:3])).
-    2. Identifies older regalia/patents/reviews prior to OGRN creation year.
+    2. Identifies explicit older copyright (<= ogrn_year - 2), patents, or explicit tenure/awards claims.
     3. Reads PDF text (using pypdf, max 3 files <= 3MB) to verify if documents contain
        liquidated company's INN or third-party rights.
     """
@@ -833,20 +996,47 @@ async def detect_regalia_and_pdf_chronology_mismatch(
     except Exception:
         ogrn_year = 2026
 
-    # 1. Check copyright and historical awards
-    copy_match = re.search(r"©\s*(200\d|201\d|202[0-3])\b", html_text)
+    if ogrn_year < 2024:
+        return findings
+
+    plain_text = _html_to_plain_text(html_text)
+    evidence_items: List[Tuple[str, str]] = []  # (quote, raw_snippet)
+
+    # 1. Explicit copyright year >= 2 years older than active OGRN
+    copy_match = re.search(r"©\s*(200\d|201\d|202[0-3])\b", plain_text)
     has_old_copy = False
-    if copy_match:
-        c_year = int(copy_match.group(1))
-        if c_year < ogrn_year:
-            has_old_copy = True
+    if copy_match and int(copy_match.group(1)) <= ogrn_year - 2:
+        has_old_copy = True
+        evidence_items.append((
+            copy_match.group(0),
+            _extract_quote_snippet(plain_text, copy_match.start(), copy_match.end()),
+        ))
 
-    # Check reviews and patents
-    has_patents = bool(re.search(r"(?i)\bпатент\s*(?:RU\s*)?\d{5,7}\b", html_text))
-    has_old_reviews = bool(re.search(r"(?i)\b(?:201[0-9]|202[0-3])\s*год[а-я]*", html_text))
+    # 2. Explicit patent number
+    patent_match = re.search(r"(?i)\bпатент\s*(?:RU\s*)?\d{5,7}\b", plain_text)
+    if patent_match:
+        evidence_items.append((
+            patent_match.group(0),
+            _extract_quote_snippet(plain_text, patent_match.start(), patent_match.end()),
+        ))
 
-    # 2. PDF inspection via pypdf
+    # 3. Explicit company tenure / historical award claim >= 2 years older than active OGRN
+    tenure_match = re.search(
+        r"(?i)(?:(?:работаем|на\s+рынке|основан[ао]?|опыт\s+работы)\s+с\s+(200\d|201\d|202[0-3])\b"
+        r"|(?:лауреат|победитель|награда|премия)[^.\n]{0,40}\b(200\d|201\d|202[0-3])\b)",
+        plain_text,
+    )
+    if tenure_match:
+        yr_str = tenure_match.group(1) or tenure_match.group(2)
+        if yr_str and int(yr_str) <= ogrn_year - 2:
+            evidence_items.append((
+                tenure_match.group(0),
+                _extract_quote_snippet(plain_text, tenure_match.start(), tenure_match.end()),
+            ))
+
+    # 4. PDF inspection via pypdf
     pdf_contained_liquidated_inn = False
+    matched_pdf_url = ""
     if pypdf and pdf_urls:
         close_c = False
         if client is None:
@@ -863,6 +1053,7 @@ async def detect_regalia_and_pdf_chronology_mismatch(
                         pdf_text += page.extract_text() or ""
                     if liquidated_inn and liquidated_inn in pdf_text:
                         pdf_contained_liquidated_inn = True
+                        matched_pdf_url = p_url
                         break
             except Exception as e:
                 logger.debug(f"Failed to read PDF {p_url}: {e}")
@@ -870,20 +1061,28 @@ async def detect_regalia_and_pdf_chronology_mismatch(
         if close_c:
             await client.aclose()
 
-    if (has_old_copy or has_old_reviews or has_patents or pdf_contained_liquidated_inn) and ogrn_year >= 2024:
+    if pdf_contained_liquidated_inn:
+        evidence_items.append((
+            str(liquidated_inn),
+            f"PDF {matched_pdf_url} содержит ИНН ликвидированного лица {liquidated_inn}",
+        ))
+
+    if evidence_items:
+        best_quote, best_snippet = evidence_items[0]
         findings.append({
             "signature": "regalia_chronology_mismatch",
             "tier": "RED_REAL_FINE",
             "legal_basis": "ч. 2 ст. 14.7 КоАП РФ, п. 2, 3 ч. 3 ст. 5 38-ФЗ",
             "description": (
                 f"Хронологический разрыв регалий: активное юридическое лицо зарегистрировано в {ogrn_year} г. "
-                f"(ОГРН {active_ogrn}), однако на сайте демонстрируются патенты, награды и отзывы предшественника "
-                f"до даты создания компании. Торговля под чужими/историческими документами без подтверждения передачи "
-                f"прав образует состав ст. 14.7 КоАП РФ и ст. 5 закона 'О рекламе' (до 500 000 руб.)."
+                f"(ОГРН {active_ogrn}), однако на сайте демонстрируются патенты, награды или указание на стаж до даты создания компании. "
+                f"Торговля под историческими документами без подтверждения передачи прав образует состав ст. 14.7 КоАП РФ и ст. 5 закона 'О рекламе' (до 500 000 руб.)."
             ),
             "ogrn_year": ogrn_year,
             "has_old_copyright": has_old_copy,
             "pdf_contained_liquidated_inn": pdf_contained_liquidated_inn,
+            "quote": best_quote,
+            "raw_snippet": best_snippet,
         })
 
     return findings

@@ -1,7 +1,7 @@
 """
-Atomic Brain Bundle Packaging for AdRadar LegalSheaf.
-Encapsulates ONNX neural network graph, precalculated legal vectors, chronotope metadata,
-conformal calibration, and cryptographic SHA-256 signed manifest into a single deployable .bundle archive.
+Atomic Brain Bundle Packaging for AdRadar v3.0 (LinkCentricAdClassifierV3).
+Encapsulates compact ONNX classifier graph, feature schema, conformal calibration,
+precalculated legal KB reference vectors, and SHA-256 signed manifest into a single .bundle archive.
 """
 
 from __future__ import annotations
@@ -10,21 +10,26 @@ import hashlib
 import io
 import json
 import logging
-import os
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import onnxruntime as ort
 import torch
 
-from legal_sheaf.chronotope import JurisdictionRouter, TemporalValidityGate
 from legal_sheaf.config import ARTIFACTS_DIR
 from legal_sheaf.explainer import LegalSheafExplainer
-from legal_sheaf.feature_builder import SlotFeatureBuilder
+from legal_sheaf.link_features import (
+    FEATURE_DIM,
+    FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION,
+    LinkCentricFeatureExtractor,
+    resolve_is_own_website,
+)
 from legal_sheaf.precedent_index import LegalPrecedentIndex
 from legal_sheaf.schema import DocumentInput, VerificationReport
 
@@ -52,8 +57,8 @@ class IntegrityError(Exception):
 
 class AdRadarBrainBundle:
     """
-    Single-file atomic deployment bundle for LegalSheafNet-16x41.
-    Provides sub-50ms cold-start inference via ONNX Runtime and cached precedent vectors.
+    Single-file atomic deployment bundle for LinkCentricAdClassifierV3.
+    Provides sub-millisecond ONNX inference and decoupled legal KB reference lookup.
     """
 
     def __init__(
@@ -63,99 +68,139 @@ class AdRadarBrainBundle:
         precedents: List[Dict[str, Any]],
         precedent_embeddings: np.ndarray,
         manifest: Dict[str, Any],
+        feature_schema: Optional[Dict[str, Any]] = None,
     ):
         self.onnx_bytes = onnx_bytes
         self.calibration = calibration
         self.precedents = precedents
         self.precedent_embeddings = precedent_embeddings
         self.manifest = manifest
+        self.feature_schema = feature_schema or {
+            "version": FEATURE_SCHEMA_VERSION,
+            "feature_dim": FEATURE_DIM,
+            "feature_names": list(FEATURE_NAMES),
+        }
 
-        # Runtime instances initialized on load
         self._onnx_session: Optional[ort.InferenceSession] = None
         self._precedent_index: Optional[LegalPrecedentIndex] = None
-        self._feature_builder: Optional[SlotFeatureBuilder] = None
+        self._feature_builder: Optional[LinkCentricFeatureExtractor] = None
         self._explainer: Optional[LegalSheafExplainer] = None
 
         self._init_runtime()
 
     def _init_runtime(self) -> None:
-        """Initializes ONNX inference session and helper modules."""
-        # Session options for CPU/GPU inference
+        """Initializes ONNX inference session, feature extractor, and decoupled reference index."""
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self._onnx_session = ort.InferenceSession(self.onnx_bytes, opts, providers=["CPUExecutionProvider"])
 
-        # Reconstruct Precedent Index with cached embeddings
-        self._precedent_index = LegalPrecedentIndex(use_fast_ngram_fallback=True)
-        self._precedent_index.all_precedents = list(self.precedents)
-        self._precedent_index.embeddings = torch.from_numpy(self.precedent_embeddings).float()
+        emb_dim = int(self.precedent_embeddings.shape[1]) if self.precedent_embeddings.ndim == 2 else 256
+        prefer_ngram = bool(self.manifest.get("use_fast_ngram_fallback", emb_dim == 256))
+        if emb_dim == 256:
+            prefer_ngram = True
 
-        self._feature_builder = SlotFeatureBuilder(precedent_index=self._precedent_index)
+        target_device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._feature_builder = LinkCentricFeatureExtractor(
+            device=target_device,
+            use_fast_ngram_fallback=prefer_ngram,
+        )
+
+        # Precedent index is strictly decoupled from ML classifier inputs (legal reference / regional check only)
+        self._precedent_index = LegalPrecedentIndex(
+            device=target_device,
+            use_fast_ngram_fallback=self._feature_builder.use_fast_ngram_fallback,
+            skip_index_build=True,
+        )
+        self._precedent_index.all_precedents = list(self.precedents)
+        if not self._precedent_index.use_fast_ngram_fallback and self._precedent_index.encoder is not None:
+            self._precedent_index.embeddings = torch.from_numpy(self.precedent_embeddings).float()
+        elif emb_dim != 256 and self._precedent_index.use_fast_ngram_fallback:
+            self._precedent_index._build_vector_index()
+        else:
+            self._precedent_index.embeddings = torch.from_numpy(self.precedent_embeddings).float()
+
         self._explainer = LegalSheafExplainer(precedent_index=self._precedent_index)
 
     @property
     def version(self) -> str:
-        return self.manifest.get("bundle_version", "1.0.0")
+        return self.manifest.get("bundle_version", "3.0.0")
 
     @property
     def statute_cutoff_date(self) -> str:
-        return self.manifest.get("statute_cutoff_date", "2026-11-14")
+        return self.manifest.get("statute_cutoff_date", "2026-06-18")
 
     @property
     def decision_threshold(self) -> float:
         return float(self.calibration.get("decision_threshold", 0.50))
 
     @property
+    def abstain_lower(self) -> float:
+        return float(self.calibration.get("abstain_lower", 0.35))
+
+    @property
+    def abstain_upper(self) -> float:
+        return float(self.calibration.get("abstain_upper", 0.62))
+
+    @property
     def certified_metrics(self) -> Dict[str, float]:
         return self.manifest.get("certified_metrics", {})
 
-    def predict_tensor(self, x: np.ndarray) -> Dict[str, np.ndarray]:
-        """
-        Runs ONNX Runtime inference on input feature tensor [B, 16, 41] or [B, 16, 36].
-        Returns dictionary of numpy output arrays.
-        """
-        if x.ndim == 2:
-            x = np.expand_dims(x, 0)
-        x = x.astype(np.float32)
-
+    def predict_features(self, x: np.ndarray) -> Dict[str, np.ndarray]:
+        """Runs ONNX Runtime inference on input feature matrix [B, 48] or [48]."""
+        arr = np.asarray(x, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = np.expand_dims(arr, 0)
         input_name = self._onnx_session.get_inputs()[0].name
-        outputs = self._onnx_session.run(None, {input_name: x})
+        outputs = self._onnx_session.run(None, {input_name: arr})
         output_names = [o.name for o in self._onnx_session.get_outputs()]
         return dict(zip(output_names, outputs))
 
+    # Backward-compatible alias
+    predict_tensor = predict_features
+
     def verify_document(self, doc: DocumentInput) -> VerificationReport:
         """
-        End-to-end audit of a document through feature builder, ONNX sheaf network,
-        and mathematical explanation report with conformal verdict.
+        End-to-end audit:
+        - OWN_WEBSITE short-circuits directly to deterministic statutory rules (< 1 ms, zero GPU/ONNX waste)
+        - EXTERNAL_PUBLICATION runs LinkCentricFeatureExtractor -> ONNX LinkCentricAdClassifierV3 -> Explainer
         """
-        feat_tensor = self._feature_builder.build_document_tensor(doc)  # [16, 41]
-        x_np = feat_tensor.unsqueeze(0).cpu().numpy()
+        t0 = time.perf_counter()
+        if resolve_is_own_website(doc):
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            return self._explainer.explain(
+                doc=doc,
+                model_output=None,
+                conformal_threshold=self.decision_threshold,
+                latency_ms=latency_ms,
+                temperature=float(self.calibration.get("temperature_val", 1.0)),
+                abstain_lower=self.abstain_lower,
+                abstain_upper=self.abstain_upper,
+            )
 
-        onnx_out = self.predict_tensor(x_np)
+        diag = self._feature_builder.extract_with_diagnostics(doc)
+        feat_vec = diag["features"]  # [48]
+        onnx_out = self.predict_features(feat_vec)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
 
-        # Convert outputs to torch tensors for explainer
-        torch_out = {
-            "violation_logit": torch.from_numpy(onnx_out["violation_logit"]),
-            "regime_logits": torch.from_numpy(onnx_out["regime_logits"]),
-            "slot_probabilities": torch.from_numpy(onnx_out["slot_probabilities"]),
-            "edge_conflict_energies": torch.from_numpy(onnx_out["edge_conflict_energies"]),
-            "total_sheaf_energy": torch.from_numpy(onnx_out["total_sheaf_energy"]),
-        }
-
-        report = self._explainer.explain(
+        return self._explainer.explain(
             doc=doc,
-            model_output=torch_out,
+            model_output=onnx_out,
             conformal_threshold=self.decision_threshold,
+            latency_ms=latency_ms,
+            temperature=float(self.calibration.get("temperature_val", 1.0)),
+            abstain_lower=self.abstain_lower,
+            abstain_upper=self.abstain_upper,
+            feature_values=feat_vec,
+            link_windows=diag["anchor_windows"],
+            tier0_flags=diag["tier0_flags"],
         )
-        return report
 
     def verify_integrity(self) -> Dict[str, Any]:
-        """
-        Verifies internal SHA-256 checksums of all bundled components against manifest.
-        """
+        """Verifies internal SHA-256 checksums of all bundled components against manifest."""
         components_hash = {
             "model.onnx": compute_sha256_bytes(self.onnx_bytes),
             "conformal_calibration.json": compute_sha256_bytes(json.dumps(self.calibration, sort_keys=True).encode()),
+            "feature_schema.json": compute_sha256_bytes(json.dumps(self.feature_schema, sort_keys=True).encode()),
             "precedents.json": compute_sha256_bytes(json.dumps(self.precedents, sort_keys=True).encode()),
             "precedent_embeddings.npy": compute_sha256_bytes(self.precedent_embeddings.tobytes()),
         }
@@ -167,9 +212,8 @@ class AdRadarBrainBundle:
             if expected_hash and current_hash != expected_hash:
                 mismatches.append({"component": name, "expected": expected_hash, "actual": current_hash})
 
-        is_valid = len(mismatches) == 0
         return {
-            "is_valid": is_valid,
+            "is_valid": len(mismatches) == 0,
             "bundle_version": self.version,
             "statute_cutoff_date": self.statute_cutoff_date,
             "mismatches": mismatches,
@@ -177,23 +221,20 @@ class AdRadarBrainBundle:
         }
 
     def save(self, path: Union[str, Path]) -> Path:
-        """
-        Saves bundle into a single atomic zip archive (.bundle).
-        """
+        """Saves bundle into a single atomic zip archive (.bundle)."""
         out_path = Path(path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Precompute hashes for manifest
         components_hash = {
             "model.onnx": compute_sha256_bytes(self.onnx_bytes),
             "conformal_calibration.json": compute_sha256_bytes(json.dumps(self.calibration, sort_keys=True).encode()),
+            "feature_schema.json": compute_sha256_bytes(json.dumps(self.feature_schema, sort_keys=True).encode()),
             "precedents.json": compute_sha256_bytes(json.dumps(self.precedents, sort_keys=True).encode()),
             "precedent_embeddings.npy": compute_sha256_bytes(self.precedent_embeddings.tobytes()),
         }
         self.manifest["sha256_components"] = components_hash
         self.manifest["packaged_at"] = datetime.now().isoformat()
 
-        # Write to temporary file first for atomic persistence
         with tempfile.NamedTemporaryFile(delete=False, suffix=".bundle.tmp") as tmp:
             tmp_path = Path(tmp.name)
 
@@ -201,16 +242,15 @@ class AdRadarBrainBundle:
             with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
                 z.writestr("model.onnx", self.onnx_bytes)
                 z.writestr("conformal_calibration.json", json.dumps(self.calibration, ensure_ascii=False, indent=2))
+                z.writestr("feature_schema.json", json.dumps(self.feature_schema, ensure_ascii=False, indent=2))
                 z.writestr("precedents.json", json.dumps(self.precedents, ensure_ascii=False, indent=2))
-                
-                # Write embeddings numpy
+
                 emb_buf = io.BytesIO()
                 np.save(emb_buf, self.precedent_embeddings)
                 z.writestr("precedent_embeddings.npy", emb_buf.getvalue())
 
                 z.writestr("manifest.json", json.dumps(self.manifest, ensure_ascii=False, indent=2))
 
-            # Atomic replace
             if out_path.exists():
                 out_path.unlink()
             tmp_path.rename(out_path)
@@ -223,22 +263,23 @@ class AdRadarBrainBundle:
 
     @classmethod
     def load(cls, path: Union[str, Path], verify_hash: bool = True) -> AdRadarBrainBundle:
-        """
-        Loads and initializes an AdRadarBrainBundle from a .bundle archive.
-        Validates SHA-256 hashes against manifest if verify_hash is True.
-        """
+        """Loads and initializes an AdRadarBrainBundle from a .bundle archive."""
         bundle_path = Path(path)
         if not bundle_path.exists():
             raise FileNotFoundError(f"Bundle file not found: {bundle_path}")
 
         with zipfile.ZipFile(bundle_path, "r") as z:
+            names = set(z.namelist())
             onnx_bytes = z.read("model.onnx")
             calibration = json.loads(z.read("conformal_calibration.json").decode("utf-8"))
             precedents = json.loads(z.read("precedents.json").decode("utf-8"))
-            
+            feature_schema = (
+                json.loads(z.read("feature_schema.json").decode("utf-8"))
+                if "feature_schema.json" in names
+                else None
+            )
             emb_buf = io.BytesIO(z.read("precedent_embeddings.npy"))
             precedent_embeddings = np.load(emb_buf)
-
             manifest = json.loads(z.read("manifest.json").decode("utf-8"))
 
         bundle = cls(
@@ -247,6 +288,7 @@ class AdRadarBrainBundle:
             precedents=precedents,
             precedent_embeddings=precedent_embeddings,
             manifest=manifest,
+            feature_schema=feature_schema,
         )
 
         if verify_hash:
@@ -261,47 +303,59 @@ class AdRadarBrainBundle:
         cls,
         artifacts_dir: Optional[Union[str, Path]] = None,
         kb_seed_dir: Optional[Union[str, Path]] = None,
-        bundle_version: str = "1.0.0",
-        certified_metrics: Optional[Dict[str, float]] = None,
+        bundle_version: str = "3.0.0",
+        certified_metrics: Optional[Dict[str, Any]] = None,
+        use_fast_ngram_fallback: bool = False,
+        encoder_device: Optional[str] = None,
+        manifest_extra: Optional[Dict[str, Any]] = None,
     ) -> AdRadarBrainBundle:
-        """
-        Builds a fresh bundle from local project artifacts and legal KB seed.
-        """
+        """Builds a fresh v3 bundle from local project artifacts and legal KB reference seed."""
         art_path = Path(artifacts_dir) if artifacts_dir else ARTIFACTS_DIR
-        onnx_path = art_path / "legal_sheaf_model.onnx"
+        onnx_path = art_path / "link_classifier_v3.onnx"
         cal_path = art_path / "conformal_calibration.json"
+        ckpt_path = art_path / "link_classifier_v3.pt"
 
         if not onnx_path.exists():
             raise FileNotFoundError(f"ONNX model missing at {onnx_path}")
 
-        with open(onnx_path, "rb") as f:
-            onnx_bytes = f.read()
-
-        calibration = {}
+        onnx_bytes = onnx_path.read_bytes()
         if cal_path.exists():
-            with open(cal_path, "r", encoding="utf-8") as f:
-                calibration = json.load(f)
+            calibration = json.loads(cal_path.read_text(encoding="utf-8"))
         else:
-            calibration = {"decision_threshold": 0.50, "target_precision": 0.96, "ece_score": 0.01}
+            calibration = {"decision_threshold": 0.50}
 
-        # Build precedent index
-        index = LegalPrecedentIndex(seed_dir=str(kb_seed_dir) if kb_seed_dir else None, use_fast_ngram_fallback=True)
+        target_device = encoder_device or ("cuda" if torch.cuda.is_available() else "cpu")
+        index = LegalPrecedentIndex(
+            seed_dir=str(kb_seed_dir) if kb_seed_dir else None,
+            device=target_device,
+            use_fast_ngram_fallback=use_fast_ngram_fallback,
+        )
         precedents = index.all_precedents
         precedent_embeddings = index.embeddings.cpu().numpy()
 
-        # Find latest statute date in precedents
-        dates = []
-        for p in precedents:
-            d = p.get("effective_from") or p.get("enacted_date")
-            if d:
-                dates.append(str(d))
-        cutoff_date = max(dates) if dates else "2026-11-14"
+        dates = [str(p.get("effective_from") or p.get("enacted_date")) for p in precedents if p.get("effective_from") or p.get("enacted_date")]
+        cutoff_date = max(dates) if dates else "2026-06-18"
 
-        metrics = certified_metrics or {
-            "precision": 0.962,
-            "recall": 0.954,
-            "ece": 0.012,
-            "f1": 0.958,
+        metrics: Dict[str, Any] = {}
+        if certified_metrics is not None:
+            metrics = dict(certified_metrics)
+        elif ckpt_path.exists():
+            try:
+                ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+                metrics = dict(ckpt.get("metrics") or {})
+            except Exception:
+                metrics = {}
+
+        if not metrics:
+            metrics = {
+                "ece": round(float(calibration.get("ece_score", 0.0)), 4),
+                "target_precision": round(float(calibration.get("target_precision", 0.96)), 4),
+            }
+
+        feature_schema = {
+            "version": FEATURE_SCHEMA_VERSION,
+            "feature_dim": FEATURE_DIM,
+            "feature_names": list(FEATURE_NAMES),
         }
 
         manifest = {
@@ -310,10 +364,18 @@ class AdRadarBrainBundle:
             "statute_cutoff_date": cutoff_date,
             "num_precedents": len(precedents),
             "embeddings_dim": precedent_embeddings.shape[1] if precedent_embeddings.ndim > 1 else 0,
+            "encoder_model": index.encoder_model_name,
+            "encoder_device": str(index.device),
+            "use_fast_ngram_fallback": bool(index.use_fast_ngram_fallback),
+            "onnx_model_size_bytes": len(onnx_bytes),
             "certified_metrics": metrics,
-            "architecture": "LegalSheafNet16x41",
+            "architecture": "LinkCentricAdClassifierV3",
+            "feature_dim": FEATURE_DIM,
+            "feature_schema_version": FEATURE_SCHEMA_VERSION,
             "author": "AdRadar AI Research Lab",
         }
+        if manifest_extra:
+            manifest.update(manifest_extra)
 
         return cls(
             onnx_bytes=onnx_bytes,
@@ -321,4 +383,5 @@ class AdRadarBrainBundle:
             precedents=precedents,
             precedent_embeddings=precedent_embeddings,
             manifest=manifest,
+            feature_schema=feature_schema,
         )

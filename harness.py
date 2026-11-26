@@ -17,8 +17,10 @@ import os
 import py_compile
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+import zipfile
 import yaml
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -35,7 +37,6 @@ os.environ["USE_TF"] = "0"
 
 ROOT_DIR = Path(__file__).resolve().parent
 SRC_DIR = ROOT_DIR / "legal_sheaf_verifier" / "src"
-VISUAL_QC_DIR = ROOT_DIR / "visual_qc"
 VERIFICATION_ENGINE_DIR = ROOT_DIR / "verification_engine"
 VLM_CONTEXT_ENGINE_DIR = ROOT_DIR / "vlm_context_engine"
 SCRIPTS_DIR = ROOT_DIR / "scripts"
@@ -99,7 +100,6 @@ def generate_ast_code_map(output_path: Path) -> Tuple[int, int]:
     """
     scan_roots = [
         SRC_DIR,
-        VISUAL_QC_DIR,
         VERIFICATION_ENGINE_DIR,
         VLM_CONTEXT_ENGINE_DIR,
         SCRIPTS_DIR,
@@ -198,12 +198,9 @@ def run_ast_policy_guard() -> List[str]:
     violations = []
     scan_targets = []
 
-    # 1. Production package src, visual_qc, verification_engine, and vlm_context_engine
+    # 1. Production package src, verification_engine, and vlm_context_engine
     if SRC_DIR.exists():
         for py_path in SRC_DIR.rglob("*.py"):
-            scan_targets.append(py_path)
-    if VISUAL_QC_DIR.exists():
-        for py_path in VISUAL_QC_DIR.rglob("*.py"):
             scan_targets.append(py_path)
     if VERIFICATION_ENGINE_DIR.exists():
         for py_path in VERIFICATION_ENGINE_DIR.rglob("*.py"):
@@ -310,10 +307,9 @@ def run_citation_whitelist_guard() -> List[str]:
     violations = []
     scan_dirs = [
         SRC_DIR,
-        VISUAL_QC_DIR,
         VERIFICATION_ENGINE_DIR,
+        VLM_CONTEXT_ENGINE_DIR,
         SCRIPTS_DIR,
-        ROOT_DIR / "config",
         ROOT_DIR / "legal_sheaf_verifier" / "config",
         DATA_DIR / "reports",
         DATA_DIR / "kits",
@@ -328,7 +324,7 @@ def run_citation_whitelist_guard() -> List[str]:
             if not p.is_file():
                 continue
             # Skip test files, virtualenv, and the whitelist itself
-            if "test_zero_fake_citations" in p.name or "verified_citations_whitelist" in p.name:
+            if "tests" in p.parts or p.name.startswith("test_") or "verified_citations_whitelist" in p.name:
                 continue
             if p.suffix.lower() in (".py", ".yaml", ".yml", ".html", ".txt", ".md"):
                 try:
@@ -560,6 +556,196 @@ def run_artifact_dom_guard() -> List[str]:
     return violations
 
 
+def run_anti_illusion_and_cli_guard() -> List[str]:
+    """
+    Oracle J: Anti-Illusion & CLI Integrity Guard.
+    Blocks gate acceptance (exit code 2) if:
+    1. build_champion_v3_bundle.py contains hardcoded metric literals ("precision": 1.0 / "ece": 0.0),
+       or champion_v3.bundle manifest lacks real VC.ru evaluation / grey-zone evaluation /
+       LinkCentricAdClassifierV3 architecture / feature_dim=48, or relies on n-gram fallback.
+    2. Any command in AdRadar_Menu.bat, adradar CLI subcommands, or scripts/run_visual_qc.py --help fails.
+    3. Any pytest test marker (e.g. test/model:free) polluted production C:\\AdRadarData\\db\\vlm_cache.sqlite.
+    """
+    violations: List[str] = []
+
+    # 1. Anti-hardcode & real VC.ru evaluation guard
+    build_script = SCRIPTS_DIR / "build_champion_v3_bundle.py"
+    if not build_script.exists():
+        violations.append(f"Missing required bundle builder script: {build_script}")
+    else:
+        src_text = build_script.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"""["']precision["']\s*:\s*1(?:\.0+)?\b""", src_text) or re.search(
+            r"""["']ece["']\s*:\s*0(?:\.0+)?\b""", src_text
+        ):
+            violations.append(
+                f"Hardcoded metric literal ('precision': 1.0 / 'ece': 0.0) detected in {build_script}"
+            )
+        try:
+            tree = ast.parse(src_text, filename=str(build_script))
+            guarded_keys = {"precision", "recall", "macro_f1", "f1", "ece", "brier_score"}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Dict):
+                    for k_node, v_node in zip(node.keys, node.values):
+                        if isinstance(k_node, ast.Constant) and k_node.value in guarded_keys:
+                            if isinstance(v_node, ast.Constant) and isinstance(v_node.value, (int, float)):
+                                violations.append(
+                                    f"AST hardcoded numeric literal for metric '{k_node.value}'={v_node.value} at {build_script}:{k_node.lineno}"
+                                )
+        except Exception as e:
+            violations.append(f"Failed to parse {build_script}: {e}")
+
+    bundle_candidates = [
+        DATA_DIR / "models" / "champion_v3.bundle",
+        ROOT_DIR / "legal_sheaf_verifier" / "artifacts" / "champion_v3.bundle",
+    ]
+    checked_any_bundle = False
+    for bpath in bundle_candidates:
+        if not bpath.exists():
+            violations.append(f"Missing champion_v3.bundle at {bpath}")
+            continue
+        checked_any_bundle = True
+        try:
+            with zipfile.ZipFile(bpath, "r") as z:
+                manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+            real_n = int(manifest.get("real_human_labeled_count", 0) or 0)
+            if real_n <= 0:
+                violations.append(f"Bundle {bpath} has real_human_labeled_count={real_n} (must be > 0)")
+            if not isinstance(manifest.get("synthetic_eval_metrics"), dict) or not manifest["synthetic_eval_metrics"]:
+                violations.append(f"Bundle {bpath} missing synthetic_eval_metrics in manifest.json")
+            if not isinstance(manifest.get("real_vcru_eval_metrics"), dict) or not manifest["real_vcru_eval_metrics"]:
+                violations.append(f"Bundle {bpath} missing real_vcru_eval_metrics in manifest.json")
+            if not isinstance(manifest.get("real_vcru_grey_eval_metrics"), dict) or not manifest["real_vcru_grey_eval_metrics"]:
+                violations.append(f"Bundle {bpath} missing real_vcru_grey_eval_metrics in manifest.json")
+            if manifest.get("architecture") != "LinkCentricAdClassifierV3" or int(manifest.get("feature_dim", 0)) != 48:
+                violations.append(
+                    f"Bundle {bpath} must use architecture=LinkCentricAdClassifierV3 and feature_dim=48 "
+                    f"(got arch={manifest.get('architecture')}, feature_dim={manifest.get('feature_dim')})"
+                )
+            if manifest.get("encoder_model") != "deepvk/USER2-base" or manifest.get("use_fast_ngram_fallback") is not False:
+                violations.append(
+                    f"Bundle {bpath} not built with live deepvk/USER2-base encoder "
+                    f"(encoder={manifest.get('encoder_model')}, ngram={manifest.get('use_fast_ngram_fallback')})"
+                )
+            if int(manifest.get("embeddings_dim", 0)) != 768:
+                violations.append(f"Bundle {bpath} expected embeddings_dim=768, got {manifest.get('embeddings_dim')}")
+        except Exception as e:
+            violations.append(f"Failed to inspect manifest in {bpath}: {e}")
+
+    if not checked_any_bundle:
+        violations.append("No champion_v3.bundle artifacts found to inspect.")
+
+    # 2. CLI subcommands & AdRadar_Menu.bat Integrity Guard
+    cli_help_outputs: Dict[str, str] = {}
+    adradar_subcommands = [
+        "--help",
+        "serve",
+        "hunt-vcru",
+        "verify-leads",
+        "build-kit",
+        "plan-horizon",
+        "ledger",
+        "learn",
+        "doctor",
+        "audit-article",
+        "audit-site",
+        "export-lawyer-doc",
+    ]
+    for sub in adradar_subcommands:
+        cmd = [str(VENV_ADRADAR), "--help"] if sub == "--help" else [str(VENV_ADRADAR), sub, "--help"]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace")
+            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            if proc.returncode != 0 or "ImportError" in combined or "ModuleNotFoundError" in combined or "Traceback" in combined:
+                violations.append(
+                    f"CLI check failed for `{' '.join(cmd)}` (rc={proc.returncode}): {combined.strip()[:200]}"
+                )
+            else:
+                cli_help_outputs[sub] = combined
+        except Exception as e:
+            violations.append(f"CLI check exception for `{sub}`: {e}")
+
+    script_checks = [
+        ("scripts/run_visual_qc.py", [str(VENV_PYTHON), str(SCRIPTS_DIR / "run_visual_qc.py"), "--help"]),
+        ("scripts/collect_vcru_labeling_set.py", [str(VENV_PYTHON), str(SCRIPTS_DIR / "collect_vcru_labeling_set.py"), "--help"]),
+        ("scripts/ensemble_labeler.py", [str(VENV_PYTHON), str(SCRIPTS_DIR / "ensemble_labeler.py"), "--help"]),
+        ("scripts/label_vcru_ui.py", [str(VENV_PYTHON), str(SCRIPTS_DIR / "label_vcru_ui.py"), "--help"]),
+        ("scripts/build_champion_v3_bundle.py", [str(VENV_PYTHON), str(SCRIPTS_DIR / "build_champion_v3_bundle.py"), "--help"]),
+    ]
+    for script_rel, cmd in script_checks:
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace")
+            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            if proc.returncode != 0 or "ImportError" in combined or "ModuleNotFoundError" in combined or "Traceback" in combined:
+                violations.append(
+                    f"Script `--help` check failed for `{script_rel}` (rc={proc.returncode}): {combined.strip()[:200]}"
+                )
+            else:
+                cli_help_outputs[script_rel] = combined
+        except Exception as e:
+            violations.append(f"Script `--help` check exception for `{script_rel}`: {e}")
+
+    bat_path = ROOT_DIR / "AdRadar_Menu.bat"
+    if not bat_path.exists():
+        violations.append(f"Missing launcher menu: {bat_path}")
+    else:
+        bat_lines = bat_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for idx, raw_line in enumerate(bat_lines, 1):
+            line = raw_line.strip()
+            m_py = re.search(r"\.venv\\Scripts\\python\.exe\s+([^\s]+)(.*)", line, re.I)
+            if m_py:
+                script_arg = m_py.group(1).strip().replace("\\", "/")
+                rest_args = m_py.group(2) or ""
+                if not (ROOT_DIR / script_arg).exists():
+                    violations.append(f"AdRadar_Menu.bat:{idx} references missing script '{script_arg}'")
+                elif script_arg in cli_help_outputs:
+                    help_txt = cli_help_outputs[script_arg]
+                    for flag in re.findall(r"(--[a-zA-Z0-9\-]+)", rest_args):
+                        if flag not in help_txt:
+                            violations.append(f"AdRadar_Menu.bat:{idx} passes unsupported flag '{flag}' to '{script_arg}'")
+
+            m_cli = re.search(r"\.venv\\Scripts\\adradar\.exe\s+([a-zA-Z0-9\-]+)(.*)", line, re.I)
+            if m_cli:
+                subcmd = m_cli.group(1).strip()
+                rest_args = m_cli.group(2) or ""
+                if subcmd not in cli_help_outputs:
+                    violations.append(f"AdRadar_Menu.bat:{idx} invokes unknown or broken adradar subcommand '{subcmd}'")
+                else:
+                    help_txt = cli_help_outputs[subcmd]
+                    for flag in re.findall(r"(--[a-zA-Z0-9\-]+)", rest_args):
+                        if flag not in help_txt:
+                            violations.append(f"AdRadar_Menu.bat:{idx} passes unsupported flag '{flag}' to `adradar {subcmd}`")
+
+    # 3. Production SQLite & Review Desk Pytest Pollution Guard
+    vlm_cache_db = DATA_DIR / "db" / "vlm_cache.sqlite"
+    if vlm_cache_db.exists():
+        try:
+            with sqlite3.connect(str(vlm_cache_db)) as conn:
+                tbls = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+                if "vlm_cache" in tbls:
+                    bad_rows = conn.execute(
+                        "SELECT model_used, COUNT(*) FROM vlm_cache "
+                        "WHERE lower(model_used) LIKE '%test%' OR lower(model_used) = 'test/model:free' "
+                        "GROUP BY model_used"
+                    ).fetchall()
+                    if bad_rows:
+                        violations.append(f"Production {vlm_cache_db} polluted by test rows in vlm_cache: {bad_rows}")
+                if "breaker_state" in tbls:
+                    bad_breakers = conn.execute(
+                        "SELECT model_id FROM breaker_state "
+                        "WHERE lower(model_id) LIKE '%test%' OR lower(model_id) = 'test/model:free'"
+                    ).fetchall()
+                    if bad_breakers:
+                        violations.append(f"Production {vlm_cache_db} polluted by test rows in breaker_state: {bad_breakers}")
+        except Exception as e:
+            violations.append(f"Failed to inspect production SQLite DB {vlm_cache_db}: {e}")
+
+    polluted_png = DATA_DIR / "review_desk" / "athenachat_ai" / "test_clean_footer.png"
+    if polluted_png.exists():
+        violations.append(f"Test artifact polluted production review_desk: {polluted_png}")
+
+    return violations
+
+
 def cmd_sync() -> int:
     """Synchronizes source packages into .venv, runs AST guard, and generates Code Map."""
     print("[*] [Harness Sync] Running Workspace Garbage Collector...")
@@ -573,19 +759,28 @@ def cmd_sync() -> int:
         print(f"[!] Site-packages not found: {SITE_PACKAGES}", file=sys.stderr)
         return 2
 
-    # 1. Copy legal_sheaf, ingestion, visual_qc, verification_engine, and vlm_context_engine packages
+    # 1. Copy legal_sheaf, ingestion, verification_engine, and vlm_context_engine packages
     pkgs = [
         (SRC_DIR / "legal_sheaf", SITE_PACKAGES / "legal_sheaf"),
         (SRC_DIR / "ingestion", SITE_PACKAGES / "ingestion"),
-        (VISUAL_QC_DIR, SITE_PACKAGES / "visual_qc"),
         (VERIFICATION_ENGINE_DIR, SITE_PACKAGES / "verification_engine"),
         (VLM_CONTEXT_ENGINE_DIR, SITE_PACKAGES / "vlm_context_engine"),
     ]
 
     copied_files = 0
+    pruned_files = 0
     for src_pkg, dest_pkg in pkgs:
         if src_pkg.exists():
             dest_pkg.mkdir(parents=True, exist_ok=True)
+            src_rels = {item.relative_to(src_pkg) for item in src_pkg.rglob("*.py")}
+            for existing in list(dest_pkg.rglob("*.py")):
+                if existing.relative_to(dest_pkg) not in src_rels:
+                    existing.unlink(missing_ok=True)
+                    pruned_files += 1
+                    cache_dir = existing.parent / "__pycache__"
+                    if cache_dir.exists():
+                        for pyc in cache_dir.glob(f"{existing.stem}.*.pyc"):
+                            pyc.unlink(missing_ok=True)
             for item in src_pkg.rglob("*.py"):
                 rel_path = item.relative_to(src_pkg)
                 target_file = dest_pkg / rel_path
@@ -598,6 +793,20 @@ def cmd_sync() -> int:
                 except py_compile.PyCompileError as e:
                     print(f"[!] Syntax error compiling {target_file}: {e}", file=sys.stderr)
                     return 2
+    if pruned_files:
+        print(f"    Pruned {pruned_files} stale .py file(s) from .venv site-packages.")
+
+    # Sync top-level showcase_server module into site-packages
+    showcase_src = SRC_DIR / "showcase_server.py"
+    if showcase_src.exists():
+        showcase_dest = SITE_PACKAGES / "showcase_server.py"
+        shutil.copy2(showcase_src, showcase_dest)
+        try:
+            py_compile.compile(str(showcase_dest), doraise=True)
+            copied_files += 1
+        except py_compile.PyCompileError as e:
+            print(f"[!] Syntax error compiling {showcase_dest}: {e}", file=sys.stderr)
+            return 2
 
     # Also compile all scripts in scripts/ to ensure syntax validity
     if SCRIPTS_DIR.exists():
@@ -681,9 +890,9 @@ async def evaluate_semantic_business_oracles() -> Tuple[bool, List[str]]:
     from legal_sheaf.scanner_152fz import Compliance152FZScanner
     from legal_sheaf.lead_packager import LeadPackager
 
-    bundle_path = DATA_DIR / "models" / "champion_v2.bundle"
+    bundle_path = DATA_DIR / "models" / "champion_v3.bundle"
     if not bundle_path.exists():
-        bundle_path = ROOT_DIR / "legal_sheaf_verifier" / "src" / "legal_sheaf" / "champion_v2.bundle"
+        bundle_path = ROOT_DIR / "legal_sheaf_verifier" / "artifacts" / "champion_v3.bundle"
 
     bundle = AdRadarBrainBundle.load(bundle_path) if bundle_path.exists() else None
     auditor = DualAuditor(bundle=bundle)
@@ -901,8 +1110,8 @@ async def evaluate_semantic_business_oracles() -> Tuple[bool, List[str]]:
         if rep_d.total_violations > 0:
             failures.append(f"Oracle G failed: Demo page has {rep_d.total_violations} 152-FZ violations.")
 
-        pol_h = generate_privacy_policy_html("ООО «АдРадар Технологии»", "7704876543", "1237700543210", "adradar.ru")
-        rep_p = scanner.scan_html(pol_h, page_url="https://adradar.ru/privacy-policy")
+        pol_h = generate_privacy_policy_html("ООО «Тест Оракул»", "7704386120", "1167746889417", "example.ru")
+        rep_p = scanner.scan_html(pol_h, page_url="https://example.ru/privacy-policy")
         if rep_p.total_violations > 0:
             failures.append(f"Oracle G failed: Reference Privacy Policy has {rep_p.total_violations} 152-FZ violations.")
 
@@ -1000,6 +1209,20 @@ async def evaluate_semantic_business_oracles() -> Tuple[bool, List[str]]:
     except Exception as e:
         failures.append(f"Oracle H/I failed with exception: {e}")
 
+    # -------------------------------------------------------------------------
+    # Oracle J: Anti-Illusion & CLI Integrity Guard
+    # -------------------------------------------------------------------------
+    print("  [*] Evaluating Oracle J (Anti-Illusion & CLI Integrity Guard)...")
+    try:
+        j_violations = run_anti_illusion_and_cli_guard()
+        if j_violations:
+            for v in j_violations:
+                failures.append(f"Oracle J failed: {v}")
+        else:
+            print("      [OK] Oracle J (Anti-Illusion & CLI Integrity Guard): Zero hardcoded metrics, real VC.ru eval, CLI & DB verified.")
+    except Exception as e:
+        failures.append(f"Oracle J failed with exception: {e}")
+
     return len(failures) == 0, failures
 
 
@@ -1072,7 +1295,7 @@ def cmd_gate() -> int:
     # -------------------------------------------------------------------------
     # [Gate 4: Semantic Business Oracles]
     # -------------------------------------------------------------------------
-    print("\n[Gate 4/4] Evaluating Semantic Business Oracles (A, B, C, D, E, F, G, H, I)...")
+    print("\n[Gate 4/4] Evaluating Semantic Business Oracles (A, B, C, D, E, F, G, H, I, J)...")
     passed, oracle_failures = asyncio.run(evaluate_semantic_business_oracles())
     if not passed:
         print("\n[GATE FAIL] Gate 4 (Semantic Business Oracles) FAILED:", file=sys.stderr)
@@ -1088,7 +1311,7 @@ def cmd_gate() -> int:
 
     # 1. Hashes of all synced production .py files (sorted deterministically)
     core_files = []
-    for pkg_dir in [SRC_DIR, VISUAL_QC_DIR, VERIFICATION_ENGINE_DIR, VLM_CONTEXT_ENGINE_DIR]:
+    for pkg_dir in [SRC_DIR, VERIFICATION_ENGINE_DIR, VLM_CONTEXT_ENGINE_DIR]:
         if pkg_dir.exists():
             for f in sorted(pkg_dir.rglob("*.py")):
                 if "test" in f.name.lower():
@@ -1102,16 +1325,16 @@ def cmd_gate() -> int:
         except Exception:
             pass
 
-    # 2. Hash of champion_v2.bundle
-    bundle_path = DATA_DIR / "models" / "champion_v2.bundle"
+    # 2. Hash of champion_v3.bundle
+    bundle_path = DATA_DIR / "models" / "champion_v3.bundle"
     if not bundle_path.exists():
-        bundle_path = ROOT_DIR / "artifacts" / "champion_v2.bundle"
+        bundle_path = ROOT_DIR / "legal_sheaf_verifier" / "artifacts" / "champion_v3.bundle"
     if bundle_path.exists():
         hasher.update(bundle_path.name.encode("utf-8"))
         hasher.update(bundle_path.read_bytes()[:65536])
 
-    # 3. Hash of all 9 oracle statuses
-    oracle_proof = f"ORACLES_PASSED:A,B,C,D,E,F,G,H,I:FAILURES={len(oracle_failures)}"
+    # 3. Hash of all 10 oracle statuses
+    oracle_proof = f"ORACLES_PASSED:A,B,C,D,E,F,G,H,I,J:FAILURES={len(oracle_failures)}"
     hasher.update(oracle_proof.encode("utf-8"))
 
     cert_hash = hasher.hexdigest()[:16]

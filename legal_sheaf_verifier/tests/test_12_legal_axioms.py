@@ -30,16 +30,16 @@ from legal_sheaf.schema import DocumentInput, LegalRegime
 
 @pytest.fixture(scope="module")
 def champion_bundle():
-    """Loads champion_v2.bundle from models cache or artifacts."""
+    """Loads champion_v3.bundle from models cache or artifacts."""
     candidates = [
-        MODELS_CACHE_DIR / "champion_v2.bundle",
-        ARTIFACTS_DIR / "champion_v2.bundle",
-        pkg_dir / "artifacts" / "champion_v2.bundle",
+        MODELS_CACHE_DIR / "champion_v3.bundle",
+        ARTIFACTS_DIR / "champion_v3.bundle",
+        pkg_dir / "artifacts" / "champion_v3.bundle",
     ]
     for c in candidates:
         if c.exists():
             return AdRadarBrainBundle.load(c)
-    pytest.fail(f"champion_v2.bundle not found in any candidate path: {candidates}")
+    pytest.fail(f"champion_v3.bundle not found in any candidate path: {candidates}")
 
 
 # ---------------------------------------------------------------------------

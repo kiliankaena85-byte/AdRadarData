@@ -166,6 +166,8 @@ VIOLATION_TO_ARTICLE_MAP = {
     "erid_missing": "14.3_part_16",
     "unmarked_ad_no_erid": "14.3_part_16",
     "incomplete_marking_label_or_inn": "14.3_part_16",
+    "partial_erid_missing_on_link": "14.3_part_16",
+    "banned_or_special_regime": "14.3_part_1",
     "rkn_unregistered_operator": "13.11_part_1",
     "third_party_ad_no_erid": "14.3_part_16",
     "superlative_without_asterisk": "14.3_part_1",
@@ -187,6 +189,12 @@ VIOLATION_TO_ARTICLE_MAP = {
     "toxic-supply-chain-widget": "13.11_part_8",
     "undisclosed_third_party_processor": "13.11_part_1",
     "undisclosed-third-party-processor": "13.11_part_1",
+    "commercial_b2c_foreign_words_168fz": "14.8_part_1",
+    "168_fz": "14.8_part_1",
+    "rkn_undeclared_cross_border_transfer": "13.11_part_1",
+    "cloudflare-turnstile": "13.11_part_8",
+    "foreign-chat-crm-widget": "13.11_part_8",
+    "foreign-ad-pixel-tiktok-linkedin": "13.11_part_8",
 }
 
 
@@ -244,6 +252,14 @@ class KoAPSanctionsCalculator:
             return "14.3_part_1"
         if "13.55" in v_clean:
             return "13.55_part_2"
+        if "14.8" in v_clean or "168" in v_clean or "zozpp" in v_clean:
+            if "part_2" in v_clean or "ч. 2" in v_clean or "refund" in v_clean:
+                return "14.8_part_2"
+            return "14.8_part_1"
+        if "14.7" in v_clean:
+            return "14.7_part_2"
+        if "20.3" in v_clean:
+            return "20.3_part_1"
         return "13.11_part_1"
 
     def calculate_penalties(

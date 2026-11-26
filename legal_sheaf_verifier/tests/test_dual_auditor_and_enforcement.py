@@ -33,14 +33,14 @@ from legal_sheaf.enforcement_reality import (
 @pytest.fixture(scope="module")
 def champion_bundle():
     candidates = [
-        MODELS_CACHE_DIR / "champion_v2.bundle",
-        ARTIFACTS_DIR / "champion_v2.bundle",
-        pkg_dir / "artifacts" / "champion_v2.bundle",
+        MODELS_CACHE_DIR / "champion_v3.bundle",
+        ARTIFACTS_DIR / "champion_v3.bundle",
+        pkg_dir / "artifacts" / "champion_v3.bundle",
     ]
     for c in candidates:
         if c.exists():
             return AdRadarBrainBundle.load(c)
-    pytest.fail(f"champion_v2.bundle not found in any candidate path: {candidates}")
+    pytest.fail(f"champion_v3.bundle not found in any candidate path: {candidates}")
 
 
 # ---------------------------------------------------------------------------

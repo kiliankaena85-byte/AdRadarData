@@ -116,3 +116,34 @@ def test_168fz_untranslated_foreign_words():
     neutral_text = "Разработчик API опубликовал новую версию SDK на сайте в домене .ru"
     res_neutral = detect_untranslated_foreign_words_168fz(neutral_text)
     assert res_neutral["has_violation_signals"] is False
+
+
+def test_vcru_sprint4_detector_guards():
+    from legal_sheaf.inn_erid_validators import extract_commercial_targets
+
+    # 1. Bearer-token prose like "loopback" must NOT be extracted as erid
+    assert extract_erid_tokens("Сменить локальный bearer-токен loopback и перезапустить сервис.") == []
+    assert validate_erid_token_format("loopback") is False  # pure alpha without digits
+
+    # 2. Ordinary prose phrases like "рекламный бюджет" / "реклама курсов" are NOT ad markings
+    res_prose = analyze_ad_label_status("В этом сезоне реклама или органика: мы увеличили рекламный бюджет. Реклама курсов дала лиды.")
+    assert res_prose["has_strict_ad_label"] is False
+    assert res_prose["is_illegal_surrogate"] is False
+
+    # 3. Hashtag #реклама IS strict marking
+    res_hash = analyze_ad_label_status("Дизайнерское освещение от студии #реклама")
+    assert res_hash["has_strict_ad_label"] is True
+
+    # 4. Hidden commercial targets extraction & neutral filtering
+    targets = extract_commercial_targets(
+        "Подробности в боте https://t.me/SovoKino_bot, пишите @andrey_dobrosvet, сайт svetville.ru, "
+        "шаблон https://disk.yandex.ru/i/75rUGfQKDuJfig, профиль по номеру (79054105930 ) заблокирован.",
+        raw_links=["https://vc.ru/services/12345"],
+        page_url="https://vc.ru/services/12345",
+    )
+    assert "https://t.me/SovoKino_bot" in targets["messenger_links"]
+    assert "@andrey_dobrosvet" in targets["at_handles"]
+    assert "svetville.ru" in targets["text_domains"]
+    assert not any("disk.yandex.ru" in u for u in targets["commercial_urls"])
+    assert not targets["phones"]
+    assert "https://vc.ru/services/12345" not in targets["commercial_urls"]

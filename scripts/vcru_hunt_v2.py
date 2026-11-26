@@ -65,7 +65,7 @@ from legal_sheaf.scanner_152fz import (
 )
 from legal_sheaf.schema import DocumentInput
 
-BUNDLE_V2_PATH = Path("C:/AdRadarData/models/champion_v2.bundle")
+BUNDLE_V2_PATH = Path("C:/AdRadarData/models/champion_v3.bundle")
 OUTPUT_LEADS_DIR = Path("C:/AdRadarData/reports/vcru_leads_v2")
 REPORT_OUTPUT_PATH = Path("C:/AdRadarData/reports/vcru_hunt_v2_report.json")
 
@@ -444,7 +444,7 @@ async def run_hunt():
         audited_posts: List[Dict[str, Any]] = []
         packaged_leads: List[Dict[str, Any]] = []
 
-        print(f"\n[*] ШАГ 1: Проверка 100 статей в режиме EXTERNAL_PUBLICATION через champion_v2.bundle...", flush=True)
+        print(f"\n[*] ШАГ 1: Проверка 100 статей в режиме EXTERNAL_PUBLICATION через champion_v3.bundle...", flush=True)
 
         for i, art in enumerate(articles, 1):
             title = art["title"]

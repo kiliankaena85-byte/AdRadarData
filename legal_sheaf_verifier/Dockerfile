@@ -14,19 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy dependency files and install
-COPY pyproject.toml .
+# Copy dependency manifest, package metadata and sources, then install package
+COPY pyproject.toml README.md ./
+COPY src/ src/
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
-# Copy project files
-COPY src/ src/
+# Copy runtime data artifacts, configs and legal KB seed
 COPY artifacts/ artifacts/
 COPY config/ config/
 COPY legal_kb_seed/ legal_kb_seed/
-
-# Re-install package in editable/local mode for scripts entrypoint
-RUN pip install --no-cache-dir -e .
 
 RUN mkdir -p /data/models /data/db /data/reports
 

@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import zlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,7 +26,15 @@ from legal_sheaf.chronotope import (
     TemporalValidityGate,
 )
 from legal_sheaf.config import MODELS_CACHE_DIR
+from legal_sheaf.link_features import get_shared_user2_encoder
 from legal_sheaf.schema import ParamIdx, SlotID
+
+_SHARED_ENCODERS: Dict[Tuple[str, str], Any] = {}
+
+
+def _get_shared_user2_encoder(device_str: str):
+    """Loads and caches deepvk/USER2-base SentenceTransformer once per (model, device)."""
+    return get_shared_user2_encoder(device_str)
 
 
 class LegalPrecedentIndex:
@@ -42,6 +51,7 @@ class LegalPrecedentIndex:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         use_fast_ngram_fallback: bool = False,
         offline_ngram_mode: Optional[bool] = None,
+        skip_index_build: bool = False,
     ):
         self.device = torch.device(device if (device == "cuda" and torch.cuda.is_available()) else "cpu")
         if offline_ngram_mode is not None:
@@ -49,6 +59,7 @@ class LegalPrecedentIndex:
         else:
             self.use_fast_ngram_fallback = use_fast_ngram_fallback
         self.encoder = None
+        self.encoder_model_name = "ngram-256-fallback" if self.use_fast_ngram_fallback else "deepvk/USER2-base"
 
         if seed_dir is None:
             # Default to legal_kb_seed directory relative to package root
@@ -62,23 +73,22 @@ class LegalPrecedentIndex:
         self.fas_letters: List[Dict[str, Any]] = []
         self.court_cases: List[Dict[str, Any]] = []
         self.all_precedents: List[Dict[str, Any]] = []
+        self.precedent_matrix = np.zeros((0, 256), dtype=np.float32)
+        self.torch_precedent_matrix = torch.zeros((0, 256), dtype=torch.float32, device=self.device)
 
         self._load_seed_corpus()
 
         # Initialize deepvk/USER2-base encoder if not in fast fallback mode
         if not self.use_fast_ngram_fallback:
             try:
-                os.environ["HF_HOME"] = str(MODELS_CACHE_DIR)
-                os.environ["SENTENCE_TRANSFORMERS_HOME"] = str(MODELS_CACHE_DIR)
-                from sentence_transformers import SentenceTransformer
-                self.encoder = SentenceTransformer("deepvk/USER2-base", device=str(self.device))
-                if self.device.type == "cuda":
-                    self.encoder.half()  # Run in FP16 on RTX 4060 (~300 MB VRAM)
-            except Exception as e:
+                self.encoder = _get_shared_user2_encoder(str(self.device))
+            except Exception:
                 # Fallback to n-gram hashing if offline or model cannot be loaded
                 self.use_fast_ngram_fallback = True
+                self.encoder_model_name = "ngram-256-fallback"
 
-        self._build_vector_index()
+        if not skip_index_build:
+            self._build_vector_index()
 
     @property
     def offline_ngram_mode(self) -> bool:
@@ -161,18 +171,19 @@ class LegalPrecedentIndex:
         text_lower = text.lower()
         words = re.findall(r"\w+", text_lower)
         
-        # Word-level features
+        # Word-level features (cross-process deterministic via zlib.crc32)
         for w in words:
-            h = hash(w) % dim
-            sign = 1.0 if (hash(w + "_s") % 2 == 0) else -1.0
+            b = w.encode("utf-8")
+            h = zlib.crc32(b) % dim
+            sign = 1.0 if ((zlib.crc32(b + b"_s") & 1) == 0) else -1.0
             vec[h] += sign * (1.0 + math.log1p(len(w)))
 
         # Character 3-gram and 4-gram features
         for n in (3, 4):
             for i in range(len(text_lower) - n + 1):
-                gram = text_lower[i : i + n]
-                h = hash(gram) % dim
-                sign = 1.0 if (hash(gram + "_s") % 2 == 0) else -1.0
+                gb = text_lower[i : i + n].encode("utf-8")
+                h = zlib.crc32(gb) % dim
+                sign = 1.0 if ((zlib.crc32(gb + b"_s") & 1) == 0) else -1.0
                 vec[h] += sign * 0.5
 
         norm = np.linalg.norm(vec)

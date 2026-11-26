@@ -5,7 +5,7 @@ Script to enrich legal_kb_seed/*.jsonl files with chronotope, hierarchy, and reg
 import json
 from pathlib import Path
 
-pkg_root = Path(r"c:\Users\ZVER\OneDrive\Документы\Аудит\legal_sheaf_verifier")
+pkg_root = Path(__file__).resolve().parent.parent
 seed_dir = pkg_root / "legal_kb_seed"
 
 # 1. Enrich statutes_rf.jsonl

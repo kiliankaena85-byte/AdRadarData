@@ -21,12 +21,12 @@ import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import httpx
 import yaml
 
-from legal_sheaf.config import ADRADAR_DATA_DIR
+from legal_sheaf import config as legal_config
 from vlm_context_engine.live_catalog import (
     LiveCatalogResolver,
     FinancialLockViolation,
@@ -38,6 +38,13 @@ logger = logging.getLogger("vlm_context_engine.gateway")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
+
+def _active_data_dir() -> Path:
+    env_dir = os.environ.get("ADRADAR_DATA_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir).resolve()
+    return Path(legal_config.ADRADAR_DATA_DIR).resolve()
+
 OPENROUTER_CHAT_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_DECISIONS_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 PROMPT_VERSION = "2026.11-v3-dualtrack"
@@ -46,46 +53,87 @@ PROMPT_VERSION = "2026.11-v3-dualtrack"
 # =============================================================================
 # 1. API KEY RESOLUTION & CITATION WHITELIST
 # =============================================================================
-def get_openrouter_api_key() -> str:
-    """Retrieves OPENROUTER_API_KEY from environment, local .env, or C:\\AdRadarData\\.env."""
-    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if key:
-        return key
-
-    # Check local workspace .env
-    local_env = Path.cwd() / ".env"
-    if local_env.exists():
-        try:
-            for line in local_env.read_text(encoding="utf-8").splitlines():
-                if line.startswith("OPENROUTER_API_KEY="):
-                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    if val:
-                        return val
-        except Exception:
-            pass
-
-    # Check C:\AdRadarData\.env
-    data_env = ADRADAR_DATA_DIR / ".env"
-    if data_env.exists():
-        try:
-            for line in data_env.read_text(encoding="utf-8").splitlines():
-                if line.startswith("OPENROUTER_API_KEY="):
-                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    if val:
-                        return val
-        except Exception:
-            pass
-
+def _read_env_key(env_path: Path, target_key: str) -> str:
+    """Safely extracts target_key from a .env file without mutating global os.environ."""
+    if not env_path.exists():
+        return ""
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == target_key:
+                val = v.strip().strip('"').strip("'")
+                if val:
+                    return val
+    except Exception:
+        pass
     return ""
+
+
+def _parse_api_key_list(raw: str) -> List[str]:
+    """Splits comma/semicolon/whitespace separated OpenRouter keys and deduplicates preserving order."""
+    keys: List[str] = []
+    for part in re.split(r"[\s,;]+", str(raw or "").strip()):
+        clean = part.strip().strip('"').strip("'")
+        if clean and clean not in keys:
+            keys.append(clean)
+    return keys
+
+
+def _mask_api_key(key: str) -> str:
+    """Returns a non-sensitive masked identifier for logging (never logs full secret)."""
+    if len(key) > 18:
+        return f"{key[:12]}...{key[-4:]}"
+    return "***" if key else ""
+
+
+def get_openrouter_api_keys() -> List[str]:
+    """
+    Retrieves OpenRouter API key pool from environment or ADRADAR_DATA_DIR/.env / repo .env / CWD/.env.
+    Supports both single OPENROUTER_API_KEY and comma/newline-separated OPENROUTER_API_KEYS.
+    """
+    env_keys = _parse_api_key_list(os.environ.get("OPENROUTER_API_KEY", ""))
+    env_pool = _parse_api_key_list(os.environ.get("OPENROUTER_API_KEYS", ""))
+    if env_keys or env_pool:
+        merged: List[str] = []
+        for k in env_keys + env_pool:
+            if k not in merged:
+                merged.append(k)
+        return merged
+
+    candidates = [
+        _active_data_dir() / ".env",
+        ROOT_DIR / ".env",
+        Path.cwd() / ".env",
+    ]
+    for env_path in candidates:
+        single_val = _read_env_key(env_path, "OPENROUTER_API_KEY")
+        multi_val = _read_env_key(env_path, "OPENROUTER_API_KEYS")
+        merged = []
+        for k in _parse_api_key_list(single_val) + _parse_api_key_list(multi_val):
+            if k not in merged:
+                merged.append(k)
+        if merged:
+            return merged
+
+    return []
+
+
+def get_openrouter_api_key() -> str:
+    """Retrieves primary OPENROUTER_API_KEY from environment, ADRADAR_DATA_DIR/.env, repo .env, or CWD/.env."""
+    keys = get_openrouter_api_keys()
+    return keys[0] if keys else ""
 
 
 def load_citation_whitelist() -> Tuple[set, set]:
     """Loads closed whitelist of verified court cases, agency letters, and allowed KoAP articles."""
     candidates = [
-        Path.cwd() / "config" / "verified_citations_whitelist.yaml",
-        ROOT_DIR / "config" / "verified_citations_whitelist.yaml",
         Path.cwd() / "legal_sheaf_verifier" / "config" / "verified_citations_whitelist.yaml",
         ROOT_DIR / "legal_sheaf_verifier" / "config" / "verified_citations_whitelist.yaml",
+        Path.cwd() / "config" / "verified_citations_whitelist.yaml",
+        ROOT_DIR / "config" / "verified_citations_whitelist.yaml",
     ]
     for p in candidates:
         if p.exists():
@@ -93,8 +141,9 @@ def load_citation_whitelist() -> Tuple[set, set]:
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
                 cases = set(data.get("verified_court_cases", []))
                 letters = set(data.get("verified_agency_letters", []))
-                koap_data = data.get("verified_koap_and_laws", {})
-                allowed_koap = set(str(x) for x in koap_data.get("koap_articles", []))
+                koap_direct = data.get("verified_koap_articles", []) or []
+                koap_nested = (data.get("verified_koap_and_laws") or {}).get("koap_articles", []) or []
+                allowed_koap = set(str(x) for x in (list(koap_direct) + list(koap_nested)))
                 citations = cases | letters
                 if citations or allowed_koap:
                     return citations, allowed_koap
@@ -103,11 +152,8 @@ def load_citation_whitelist() -> Tuple[set, set]:
     return set(), set()
 
 
-def sanitize_model_citations(text: str, allowed_citations: set, allowed_koap: Optional[set] = None) -> str:
-    """
-    Scans model output text for court case, agency letter patterns, and unauthorized KoAP articles.
-    Any unverified citation or article is replaced to prevent citation hallucination.
-    """
+def _sanitize_text_citations(text: str, allowed_citations: set, allowed_koap: Optional[set] = None) -> str:
+    """Sanitizes a single string against verified citations and KoAP articles."""
     if not text:
         return ""
 
@@ -139,6 +185,43 @@ def sanitize_model_citations(text: str, allowed_citations: set, allowed_koap: Op
         text = pat_koap2.sub(_replace_koap, text)
 
     return text
+
+
+def sanitize_model_citations(
+    text_or_payload: Union[str, Dict[str, Any]],
+    allowed_citations: set,
+    allowed_koap: Optional[set] = None,
+) -> Union[str, Dict[str, Any]]:
+    """
+    Scans model output (string or VLM response dict) for unverified court case numbers,
+    agency letters, and unauthorized KoAP articles.
+    When passed a dict, sanitizes human_hint_ru, methods_mismatch_note, and each item
+    inside findings_verdicts[*]['visual_evidence_ru'] (plus exact_visible_text/reconciliation_note).
+    """
+    if isinstance(text_or_payload, dict):
+        cleaned_payload = dict(text_or_payload)
+        for top_key in ("human_hint_ru", "methods_mismatch_note", "details"):
+            val = cleaned_payload.get(top_key)
+            if isinstance(val, str):
+                cleaned_payload[top_key] = _sanitize_text_citations(val, allowed_citations, allowed_koap)
+
+        verdicts = cleaned_payload.get("findings_verdicts")
+        if isinstance(verdicts, list):
+            new_verdicts = []
+            for fv in verdicts:
+                if isinstance(fv, dict):
+                    fv_copy = dict(fv)
+                    for sub_key in ("visual_evidence_ru", "exact_visible_text", "reconciliation_note"):
+                        sub_val = fv_copy.get(sub_key)
+                        if isinstance(sub_val, str):
+                            fv_copy[sub_key] = _sanitize_text_citations(sub_val, allowed_citations, allowed_koap)
+                    new_verdicts.append(fv_copy)
+                else:
+                    new_verdicts.append(fv)
+            cleaned_payload["findings_verdicts"] = new_verdicts
+        return cleaned_payload
+
+    return _sanitize_text_citations(text_or_payload, allowed_citations, allowed_koap)
 
 
 def extract_json_resilient(raw_response: str) -> Dict[str, Any]:
@@ -215,7 +298,7 @@ class CircuitBreaker:
     ):
         self.failure_threshold = failure_threshold
         self.cooldown_seconds = cooldown_seconds
-        self.db_path = db_path or (ADRADAR_DATA_DIR / "db" / "vlm_cache.sqlite")
+        self.db_path = db_path or (_active_data_dir() / "db" / "vlm_cache.sqlite")
         self._failures: Dict[str, int] = {}
         self._cooldown_until: Dict[str, float] = {}
         self._load_from_db()
@@ -344,7 +427,7 @@ class VlmSqliteCache:
     """Idempotent cache for VLM responses keyed by SHA-256(url + collage_bytes + prompt_ver)."""
 
     def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = db_path or (ADRADAR_DATA_DIR / "db" / "vlm_cache.sqlite")
+        self.db_path = db_path or (_active_data_dir() / "db" / "vlm_cache.sqlite")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -427,18 +510,59 @@ class OpenRouterGateway:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: Optional[Union[str, List[str]]] = None,
         catalog_resolver: Optional[LiveCatalogResolver] = None,
         circuit_breaker: Optional[CircuitBreaker] = None,
         rate_limiter: Optional[TokenBucketRateLimiter] = None,
         cache: Optional[VlmSqliteCache] = None,
+        api_keys: Optional[List[str]] = None,
     ):
-        self.api_key = api_key or get_openrouter_api_key()
+        if api_keys is not None:
+            resolved_keys = _parse_api_key_list(",".join(api_keys))
+        elif api_key is not None:
+            if isinstance(api_key, (list, tuple)):
+                resolved_keys = _parse_api_key_list(",".join(str(x) for x in api_key))
+            elif str(api_key).strip() == "":
+                resolved_keys = []
+            else:
+                resolved_keys = _parse_api_key_list(str(api_key))
+        else:
+            resolved_keys = get_openrouter_api_keys()
+
+        self.api_keys: List[str] = resolved_keys
+        self.api_key: str = resolved_keys[0] if resolved_keys else ""
+        self._key_cursor: int = 0
+        self._exhausted_keys: Set[str] = set()
         self.catalog_resolver = catalog_resolver or LiveCatalogResolver()
         self.circuit_breaker = circuit_breaker or CircuitBreaker()
         self.rate_limiter = rate_limiter or TokenBucketRateLimiter(max_rpm=12)
         self.cache = cache or VlmSqliteCache()
         self.allowed_citations, self.allowed_koap = load_citation_whitelist()
+
+    def _active_key_pool(self) -> List[str]:
+        """Returns active API keys rotated from current cursor, excluding exhausted keys."""
+        if not self.api_keys:
+            return []
+        n = len(self.api_keys)
+        start = self._key_cursor % n
+        ordered = [self.api_keys[(start + i) % n] for i in range(n)]
+        return [k for k in ordered if k not in self._exhausted_keys]
+
+    def _rotate_past_key(self, used_key: str) -> None:
+        if used_key in self.api_keys:
+            idx = self.api_keys.index(used_key)
+            self._key_cursor = (idx + 1) % len(self.api_keys)
+            if self._active_key_pool():
+                self.api_key = self._active_key_pool()[0]
+
+    @staticmethod
+    def _build_headers(api_key: str, title: str) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://adradar.ru",
+            "X-Title": title,
+        }
 
     # -------------------------------------------------------------------------
     # Track A: Decisions API
@@ -455,7 +579,8 @@ class OpenRouterGateway:
         Executes structured decision arbitration.
         Attempts POST /api/alpha/decisions; falls back to structured chat completions if alpha is unavailable.
         """
-        if not self.api_key:
+        active_keys = self._active_key_pool()
+        if not active_keys:
             return {
                 "status": "UNVERIFIED",
                 "decisions": [],
@@ -475,13 +600,6 @@ class OpenRouterGateway:
             c = httpx.AsyncClient(timeout=35.0)
             close_client = True
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://adradar.ru",
-            "X-Title": "AdRadar Decisions Gate",
-        }
-
         # Attempt Track A Alpha Decisions endpoint
         decisions_payload = {
             "instructions": instructions,
@@ -489,19 +607,32 @@ class OpenRouterGateway:
             "questions": decision_questions,
         }
 
-        try:
-            await self.rate_limiter.acquire()
-            resp = await c.post(
-                OPENROUTER_DECISIONS_ENDPOINT,
-                json=decisions_payload,
-                headers=headers,
-            )
-            if resp.status_code == 200:
-                result = resp.json()
-                self.cache.set(cache_key, result, "openrouter/alpha/decisions")
-                return result
-        except Exception as e:
-            logger.info(f"Track A alpha endpoint not available or failed ({e}), falling back to structured Chat VLM.")
+        for active_key in active_keys:
+            try:
+                await self.rate_limiter.acquire()
+                resp = await c.post(
+                    OPENROUTER_DECISIONS_ENDPOINT,
+                    json=decisions_payload,
+                    headers=self._build_headers(active_key, "AdRadar Decisions Gate"),
+                )
+                if resp.status_code == 200:
+                    result = resp.json()
+                    self._rotate_past_key(active_key)
+                    self.cache.set(cache_key, result, "openrouter/alpha/decisions")
+                    return result
+                elif resp.status_code in (401, 402, 403):
+                    logger.warning(f"OpenRouter key {_mask_api_key(active_key)} rejected on Track A (HTTP {resp.status_code}); rotating.")
+                    self._exhausted_keys.add(active_key)
+                    self._rotate_past_key(active_key)
+                    continue
+                elif resp.status_code == 429:
+                    logger.warning(f"OpenRouter key {_mask_api_key(active_key)} rate-limited on Track A (HTTP 429); rotating.")
+                    self._rotate_past_key(active_key)
+                    continue
+                break
+            except Exception as e:
+                logger.info(f"Track A alpha endpoint not available or failed ({e}), falling back to structured Chat VLM.")
+                break
 
         # Fallback to Track B with Decisions JSON Schema
         fallback_prompt = (
@@ -541,24 +672,46 @@ class OpenRouterGateway:
                 return {"status": "UNVERIFIED", "decisions": [], "error": "All models in cooldown."}
 
             for model in available:
-                await self.rate_limiter.acquire()
-                try:
-                    resp = await c.post(
-                        OPENROUTER_CHAT_ENDPOINT,
-                        json={"model": model, "messages": messages, "temperature": 0.1},
-                        headers=headers,
-                    )
-                    if resp.status_code == 200:
-                        raw = resp.json()["choices"][0]["message"]["content"]
-                        parsed = _parse_json_resilient(raw)
-                        self.circuit_breaker.record_success(model)
-                        self.cache.set(cache_key, parsed, model)
-                        return parsed
-                    elif resp.status_code in (429, 503):
+                keys_for_model = self._active_key_pool()
+                if not keys_for_model:
+                    break
+                all_rate_limited = True
+                for active_key in keys_for_model:
+                    await self.rate_limiter.acquire()
+                    try:
+                        resp = await c.post(
+                            OPENROUTER_CHAT_ENDPOINT,
+                            json={"model": model, "messages": messages, "temperature": 0.1},
+                            headers=self._build_headers(active_key, "AdRadar Decisions Gate"),
+                        )
+                        if resp.status_code == 200:
+                            raw = resp.json()["choices"][0]["message"]["content"]
+                            parsed = _parse_json_resilient(raw)
+                            self._rotate_past_key(active_key)
+                            self.circuit_breaker.record_success(model)
+                            self.cache.set(cache_key, parsed, model)
+                            return parsed
+                        elif resp.status_code in (401, 402, 403):
+                            logger.warning(f"OpenRouter key {_mask_api_key(active_key)} unauthorized/empty ({resp.status_code}); rotating.")
+                            self._exhausted_keys.add(active_key)
+                            self._rotate_past_key(active_key)
+                            continue
+                        elif resp.status_code == 429:
+                            logger.warning(f"OpenRouter key {_mask_api_key(active_key)} rate-limited on {model} (429); rotating.")
+                            self._rotate_past_key(active_key)
+                            continue
+                        else:
+                            all_rate_limited = False
+                            if resp.status_code == 503:
+                                self.circuit_breaker.record_failure(model)
+                            break
+                    except Exception as e:
+                        all_rate_limited = False
                         self.circuit_breaker.record_failure(model)
-                except Exception as e:
+                        logger.warning(f"Decisions fallback error on {model}: {e}")
+                        break
+                if all_rate_limited:
                     self.circuit_breaker.record_failure(model)
-                    logger.warning(f"Decisions fallback error on {model}: {e}")
         finally:
             if close_client:
                 await c.aclose()
@@ -582,7 +735,7 @@ class OpenRouterGateway:
         Enforces ZDR header in paid_mode.
         Applies prompt injection encapsulation, 12 RPM rate limiter, CircuitBreaker, and Citation Sanitizer.
         """
-        if not self.api_key:
+        if not self._active_key_pool():
             logger.info("OPENROUTER_API_KEY is not set. Skipping VLM verification (Zero-Mock active).")
             return {
                 "status": "VLM_UNVERIFIED_NO_KEY",
@@ -739,7 +892,10 @@ class OpenRouterGateway:
 
         try:
             for model in available:
-                await self.rate_limiter.acquire()
+                keys_for_model = self._active_key_pool()
+                if not keys_for_model:
+                    last_error = "Все ключи OpenRouter исчерпаны или отклонены (401/402/403)."
+                    break
 
                 req_body: Dict[str, Any] = {
                     "model": model,
@@ -750,41 +906,70 @@ class OpenRouterGateway:
                     # Mandatory Zero Data Retention (ZDR) configuration
                     req_body["provider"] = {"data_collection": "deny", "zdr": True}
 
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://adradar.ru",
-                    "X-Title": "AdRadar Visual QC",
-                }
+                model_rate_limited_all_keys = True
+                for active_key in keys_for_model:
+                    await self.rate_limiter.acquire()
+                    headers = self._build_headers(active_key, "AdRadar Visual QC")
 
-                try:
-                    resp = await c.post(
-                        OPENROUTER_CHAT_ENDPOINT,
-                        json=req_body,
-                        headers=headers,
-                    )
-                    if resp.status_code == 200:
-                        raw_content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                        try:
-                            result_data = _parse_json_resilient(raw_content)
-                            used_model = model
-                            self.circuit_breaker.record_success(model)
-                            break
-                        except Exception as parse_err:
-                            logger.warning(f"Failed to parse JSON from {model}: {parse_err}")
-                            last_error = f"JSON parse error from {model}: {parse_err}"
+                    try:
+                        resp = await c.post(
+                            OPENROUTER_CHAT_ENDPOINT,
+                            json=req_body,
+                            headers=headers,
+                        )
+                        if resp.status_code == 200:
+                            raw_content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                            try:
+                                result_data = _parse_json_resilient(raw_content)
+                                used_model = model
+                                model_rate_limited_all_keys = False
+                                self._rotate_past_key(active_key)
+                                self.circuit_breaker.record_success(model)
+                                break
+                            except Exception as parse_err:
+                                logger.warning(f"Failed to parse JSON from {model}: {parse_err}")
+                                last_error = f"JSON parse error from {model}: {parse_err}"
+                                model_rate_limited_all_keys = False
+                                self.circuit_breaker.record_failure(model)
+                                break
+                        elif resp.status_code in (401, 402, 403):
+                            logger.warning(
+                                f"OpenRouter key {_mask_api_key(active_key)} rejected on {model} "
+                                f"(HTTP {resp.status_code}); rotating key."
+                            )
+                            last_error = f"HTTP {resp.status_code} on key {_mask_api_key(active_key)}"
+                            self._exhausted_keys.add(active_key)
+                            self._rotate_past_key(active_key)
+                            continue
+                        elif resp.status_code == 429:
+                            logger.warning(
+                                f"OpenRouter {model} returned HTTP 429 on key {_mask_api_key(active_key)}; rotating key."
+                            )
+                            last_error = f"HTTP 429 from {model} on key {_mask_api_key(active_key)}"
+                            self._rotate_past_key(active_key)
+                            continue
+                        elif resp.status_code == 503:
+                            logger.warning(f"OpenRouter {model} returned HTTP 503")
+                            last_error = f"HTTP 503 from {model}"
+                            model_rate_limited_all_keys = False
                             self.circuit_breaker.record_failure(model)
-                    elif resp.status_code in (429, 503):
-                        logger.warning(f"OpenRouter {model} returned HTTP {resp.status_code}")
-                        last_error = f"HTTP {resp.status_code} from {model}"
+                            break
+                        else:
+                            logger.warning(f"OpenRouter {model} error {resp.status_code}: {resp.text[:200]}")
+                            last_error = f"HTTP {resp.status_code}: {resp.text[:150]}"
+                            model_rate_limited_all_keys = False
+                            self.circuit_breaker.record_failure(model)
+                            break
+                    except Exception as conn_err:
+                        logger.warning(f"Connection error to {model}: {conn_err}")
+                        last_error = str(conn_err)
+                        model_rate_limited_all_keys = False
                         self.circuit_breaker.record_failure(model)
-                    else:
-                        logger.warning(f"OpenRouter {model} error {resp.status_code}: {resp.text[:200]}")
-                        last_error = f"HTTP {resp.status_code}: {resp.text[:150]}"
-                        self.circuit_breaker.record_failure(model)
-                except Exception as conn_err:
-                    logger.warning(f"Connection error to {model}: {conn_err}")
-                    last_error = str(conn_err)
+                        break
+
+                if result_data is not None:
+                    break
+                if model_rate_limited_all_keys:
                     self.circuit_breaker.record_failure(model)
         finally:
             if close_client:
@@ -802,15 +987,12 @@ class OpenRouterGateway:
                 "human_hint_ru": "Произошла ошибка при обращении к VLM. Проверьте скриншоты зон вручную в review_desk.",
             }
 
-        # Sanitize citations in text fields
-        if "human_hint_ru" in result_data and isinstance(result_data["human_hint_ru"], str):
-            result_data["human_hint_ru"] = sanitize_model_citations(
-                result_data["human_hint_ru"], self.allowed_citations, self.allowed_koap
-            )
-        if "methods_mismatch_note" in result_data and isinstance(result_data["methods_mismatch_note"], str):
-            result_data["methods_mismatch_note"] = sanitize_model_citations(
-                result_data["methods_mismatch_note"], self.allowed_citations, self.allowed_koap
-            )
+        # Sanitize citations in top-level text fields and nested findings_verdicts[*].visual_evidence_ru
+        sanitized_result = sanitize_model_citations(
+            result_data, self.allowed_citations, self.allowed_koap
+        )
+        if isinstance(sanitized_result, dict):
+            result_data = sanitized_result
 
         result_data["model_used"] = used_model
 
@@ -819,8 +1001,19 @@ class OpenRouterGateway:
         return result_data
 
 
-# Singleton instance
-_DEFAULT_GATEWAY = OpenRouterGateway()
+# Lazy singleton instance (never writes to disk on import)
+_DEFAULT_GATEWAY: Optional[OpenRouterGateway] = None
+_DEFAULT_GATEWAY_DIR: Optional[Path] = None
+
+
+def get_default_gateway() -> OpenRouterGateway:
+    """Returns a lazy singleton OpenRouterGateway bound to the active ADRADAR_DATA_DIR."""
+    global _DEFAULT_GATEWAY, _DEFAULT_GATEWAY_DIR
+    cur_dir = _active_data_dir()
+    if _DEFAULT_GATEWAY is None or _DEFAULT_GATEWAY_DIR != cur_dir or not _DEFAULT_GATEWAY._active_key_pool():
+        _DEFAULT_GATEWAY = OpenRouterGateway()
+        _DEFAULT_GATEWAY_DIR = cur_dir
+    return _DEFAULT_GATEWAY
 
 
 async def verify_visual_triggers(
@@ -831,9 +1024,40 @@ async def verify_visual_triggers(
     client: Optional[httpx.AsyncClient] = None,
     api_key: Optional[str] = None,
     primary_model: Optional[str] = None,
+    provider: str = "auto",
 ) -> Dict[str, Any]:
-    """Backward-compatible entry point for visual verification callers."""
-    gateway = OpenRouterGateway(api_key=api_key) if api_key else _DEFAULT_GATEWAY
+    """
+    Unified entry point for visual verification callers.
+    Defaults to Direct Google Gemini API (`provider="auto"` when `GEMINI_API_KEY` is configured),
+    falling back to OpenRouter when requested or when only OpenRouter keys exist.
+    """
+    prov = str(provider or "auto").strip().lower()
+    use_gemini = False
+    if prov == "gemini":
+        use_gemini = True
+    elif prov == "openrouter":
+        use_gemini = False
+    else:
+        # auto routing: explicit non-AIza key preserves OpenRouter callers/tests
+        if api_key is not None:
+            use_gemini = str(api_key).strip().startswith("AIza")
+        else:
+            from vlm_context_engine.gemini_gateway import get_gemini_api_keys
+            use_gemini = bool(get_gemini_api_keys())
+
+    if use_gemini:
+        from vlm_context_engine.gemini_gateway import GeminiGateway, get_default_gemini_gateway
+        gateway = GeminiGateway(api_key=api_key) if api_key is not None else get_default_gemini_gateway()
+        return await gateway.track_b_chat_verify(
+            collage_path=collage_path,
+            audit_findings=audit_findings,
+            policy_snippet=policy_snippet,
+            paid_mode=paid_zdr_mode,
+            client=client,
+            primary_model=primary_model,
+        )
+
+    gateway = OpenRouterGateway(api_key=api_key) if api_key is not None else get_default_gateway()
     raw_result = await gateway.track_b_chat_verify(
         collage_path=collage_path,
         audit_findings=audit_findings,

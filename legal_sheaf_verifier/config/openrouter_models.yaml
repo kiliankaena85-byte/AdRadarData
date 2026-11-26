@@ -1,34 +1,303 @@
-# OpenRouter Model Registry & Catalog Configuration (November 2026)
-# Governs visual_qc and triad_decision_router
-
+last_verified_date: '2026-11-16'
 live_catalog_settings:
-  refresh_interval_seconds: 86400  # 24 hours
-  catalog_endpoint: "https://openrouter.ai/api/v1/models"
-  cache_file: "C:/AdRadarData/cache/openrouter_models_catalog.json"
+  refresh_interval_seconds: 86400
+  catalog_endpoint: https://openrouter.ai/api/v1/models
+  cache_file: C:/AdRadarData/cache/openrouter_models_catalog.json
   circuit_breaker:
     consecutive_error_threshold: 3
-    cooldown_seconds: 600  # 10 minutes
+    cooldown_seconds: 600
   rate_limit:
     max_requests_per_minute: 12
-  cache_db: "C:/AdRadarData/db/vlm_cache.sqlite"
-
+  cache_db: C:/AdRadarData/db/vlm_cache.sqlite
 free_tier:
-  primary: "nvidia/nemotron-3.5-super-vl:free"
+  primary: nvidia/nemotron-3.5-super-vl:free
   fallbacks:
-    - "google/gemma-4-26b-a4b-it:free"
-    - "google/gemma-4-31b-it:free"
-    - "openrouter/free"
-  decider: "perplexity/pplx-decider-v1.3:free"
-
+  - google/gemma-4-26b-a4b-it:free
+  - google/gemma-4-31b-it:free
+  - openrouter/free
+  decider: openrouter/free
+  decider_alpha_candidates:
+  - perplexity/pplx-decider-v1.3:free
+  - perplexity/pplx-decider-flash-v1.3:free
+ensemble_jury:
+  tier_2a_decisions:
+    primary: perplexity/pplx-decider-v1.3:free
+    fallback: perplexity/pplx-decider-flash-v1.3:free
+  tier_2b_nvidia:
+    primary: nvidia/nemotron-3-ultra-550b-a55b:free
+    fallback: nvidia/nemotron-3.5-super-vl:free
+  tier_2c_independent:
+    primary: google/gemma-4-31b-it:free
+    fallback: baidu/ernie-5.5-flash-preview:free
+    secondary_fallback: cohere/north-mini-code:free
 paid_zdr_tier:
-  primary: "google/gemini-4-hydrogen"
+  primary: google/gemini-4-hydrogen
   alternatives:
-    - "deepseek/deepseek-v4.1-flash-1017"
-  vip_arbiter: "google/gemini-4-argon"
+  - deepseek/deepseek-v4.1-flash-1017
+  vip_arbiter: google/gemini-4-argon
   provider_options:
-    data_collection: "deny"
+    data_collection: deny
     zdr: true
   banned_models:
-    - "google/gemini-2.5-flash"  # Deprecated Dec 1
-    - "google/gemma-3"
-    - "ling-3.2"  # 43.6% JSON error rate
+  - google/gemini-2.5-flash
+  - google/gemma-3
+  - inclusionai/ling-3.2-flash:free
+verified_model_specs:
+  nvidia/nemotron-3-ultra-550b-a55b:free:
+    context_length: 1000000
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - reasoning_effort
+    - seed
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: true
+  baidu/ernie-5.5-flash-preview:free:
+    context_length: 1024000
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - reasoning_effort
+    - response_format
+    - structured_outputs
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: true
+  cohere/north-mini-code:free:
+    context_length: 256000
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    output_modalities:
+    - text
+    verified_free: true
+  perplexity/pplx-decider-v1.3:free:
+    context_length: 131072
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    output_modalities:
+    - text
+    verified_free: true
+  perplexity/pplx-decider-flash-v1.3:free:
+    context_length: 131072
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    output_modalities:
+    - text
+    verified_free: true
+  nvidia/nemotron-3.5-super-vl:free:
+    context_length: 1000000
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    - image
+    - video
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - response_format
+    - seed
+    - structured_outputs
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: true
+  google/gemma-4-26b-a4b-it:free:
+    context_length: 262144
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - image
+    - text
+    - video
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - response_format
+    - seed
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: true
+  google/gemma-4-31b-it:free:
+    context_length: 262144
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - image
+    - text
+    - video
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - response_format
+    - seed
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: true
+  openrouter/free:
+    context_length: 200000
+    pricing:
+      prompt: 0.0
+      completion: 0.0
+    input_modalities:
+    - text
+    - image
+    output_modalities:
+    - text
+    supported_parameters:
+    - frequency_penalty
+    - include_reasoning
+    - logprobs
+    - max_completion_tokens
+    - max_tokens
+    - min_p
+    - presence_penalty
+    - reasoning
+    - reasoning_effort
+    - repetition_penalty
+    - response_format
+    - seed
+    - stop
+    - structured_outputs
+    - temperature
+    - tool_choice
+    - tools
+    - top_k
+    - top_logprobs
+    - top_p
+    verified_free: true
+  google/gemini-4-hydrogen:
+    context_length: 1048576
+    pricing:
+      prompt: 1.5e-06
+      completion: 7.5e-06
+    input_modalities:
+    - audio
+    - file
+    - image
+    - text
+    - video
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - reasoning_effort
+    - response_format
+    - seed
+    - stop
+    - structured_outputs
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: false
+  google/gemini-4-argon:
+    context_length: 1048576
+    pricing:
+      prompt: 2.0e-06
+      completion: 1.0e-05
+    input_modalities:
+    - audio
+    - file
+    - image
+    - text
+    - video
+    output_modalities:
+    - text
+    supported_parameters:
+    - include_reasoning
+    - max_tokens
+    - reasoning
+    - reasoning_effort
+    - response_format
+    - seed
+    - stop
+    - structured_outputs
+    - temperature
+    - tool_choice
+    - tools
+    - top_p
+    verified_free: false
+  deepseek/deepseek-v4.1-flash-1017:
+    context_length: 1048576
+    pricing:
+      prompt: 3.0e-07
+      completion: 1.2e-06
+    input_modalities:
+    - text
+    - image
+    output_modalities:
+    - text
+    supported_parameters:
+    - frequency_penalty
+    - include_reasoning
+    - logit_bias
+    - logprobs
+    - max_completion_tokens
+    - max_tokens
+    - min_p
+    - parallel_tool_calls
+    - presence_penalty
+    - reasoning
+    - reasoning_effort
+    - repetition_penalty
+    - response_format
+    - seed
+    - stop
+    - structured_outputs
+    - temperature
+    - tool_choice
+    - tools
+    - top_k
+    - top_logprobs
+    - top_p
+    verified_free: false

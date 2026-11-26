@@ -22,6 +22,7 @@ if str(pkg_src) not in sys.path:
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+import showcase_server
 from legal_sheaf.config import ADRADAR_DATA_DIR
 from legal_sheaf.remediation_kit import (
     build_remediation_kit,
@@ -30,7 +31,6 @@ from legal_sheaf.remediation_kit import (
 )
 from legal_sheaf.scanner_152fz import Compliance152FZScanner
 from legal_sheaf.web_templates import render_demo_page, render_landing_page
-from showcase_server import INBOUND_DB_PATH, create_app
 
 
 def test_remediation_kit_generation_and_integrity():
@@ -95,22 +95,22 @@ def test_web_pages_compliance_152fz_scanner():
 
     # 3. Privacy Policy (GET /privacy-policy)
     policy_html = generate_privacy_policy_html(
-        legal_name="ООО «АдРадар Технологии»",
-        inn="7704876543",
-        ogrn="1237700543210",
-        domain="adradar.ru",
+        legal_name="ООО «Тест-Комплаенс»",
+        inn="7704386120",
+        ogrn="1167746889417",
+        domain="example.ru",
     )
-    rep_policy = scanner.scan_html(policy_html, page_url="https://adradar.ru/privacy-policy")
+    rep_policy = scanner.scan_html(policy_html, page_url="https://example.ru/privacy-policy")
     assert rep_policy.is_compliant
     assert rep_policy.total_violations == 0
 
     # 4. Consent (GET /consent)
     consent_html = generate_separate_consent_html(
-        legal_name="ООО «АдРадар Технологии»",
-        inn="7704876543",
-        domain="adradar.ru",
+        legal_name="ООО «Тест-Комплаенс»",
+        inn="7704386120",
+        domain="example.ru",
     )
-    rep_consent = scanner.scan_html(consent_html, page_url="https://adradar.ru/consent")
+    rep_consent = scanner.scan_html(consent_html, page_url="https://example.ru/consent")
     assert rep_consent.is_compliant
     assert rep_consent.total_violations == 0
 
@@ -118,7 +118,7 @@ def test_web_pages_compliance_152fz_scanner():
 def test_showcase_server_apis():
     """Tests /api/express-check rate-limiting and /api/lead consent requirement and SQLite persistence."""
     async def _run():
-        app = create_app()
+        app = showcase_server.create_app()
         server = TestServer(app)
         client = TestClient(server)
         await client.start_server()
@@ -171,7 +171,7 @@ def test_showcase_server_apis():
             assert lead_id is not None and lead_id > 0
 
             # Verify record in SQLite database
-            with sqlite3.connect(INBOUND_DB_PATH) as conn:
+            with sqlite3.connect(showcase_server.INBOUND_DB_PATH) as conn:
                 cursor = conn.execute(
                     "SELECT domain, phone, email, tariff FROM inbound_leads WHERE id = ?",
                     (lead_id,),

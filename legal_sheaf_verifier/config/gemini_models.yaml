@@ -1,0 +1,47 @@
+last_verified_date: '2026-11-19'
+provider: google_gemini_direct
+api_base_url: https://generativelanguage.googleapis.com/v1beta
+live_catalog_settings:
+  refresh_interval_seconds: 86400
+  catalog_endpoint: https://generativelanguage.googleapis.com/v1beta/models
+  cache_file: C:/AdRadarData/cache/gemini_models_catalog.json
+  circuit_breaker:
+    consecutive_error_threshold: 3
+    cooldown_seconds: 600
+  rate_limit:
+    max_requests_per_minute: 30
+  cache_db: C:/AdRadarData/db/vlm_cache.sqlite
+
+vlm_visual_qc:
+  primary: gemini-3-flash-preview
+  fallbacks:
+    - gemini-3.5-flash-lite
+    - gemini-2.5-flash
+    - gemini-2.5-flash-lite
+  vip_arbiter: gemini-4-argon
+
+reality_skeptic_jury:
+  family_1_gemini_v3:
+    primary: gemini-3-flash-preview
+    fallbacks:
+      - gemini-3.5-flash-lite
+  family_2_gemini_v25:
+    primary: gemini-2.5-flash
+    fallbacks:
+      - gemini-2.5-flash-lite
+      - gemma-4-31b-it
+
+ensemble_labeler_jury:
+  tier_2b_primary:
+    primary: gemini-3-flash-preview
+    fallbacks:
+      - gemini-3.5-flash-lite
+  tier_2c_secondary:
+    primary: gemini-2.5-flash
+    fallbacks:
+      - gemini-2.5-flash-lite
+
+banned_models:
+  # Verified 2026-11-19: gemini-2.5-pro returned 404 deprecated; gemini-3.5-flash timed out >15s
+  - gemini-2.5-pro
+  - gemini-3.5-flash

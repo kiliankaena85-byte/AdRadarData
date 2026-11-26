@@ -63,7 +63,7 @@ from legal_sheaf.scanner_152fz import (
 )
 from legal_sheaf.schema import DocumentInput
 
-BUNDLE_V2_PATH = Path("C:/AdRadarData/models/champion_v2.bundle")
+BUNDLE_V2_PATH = Path("C:/AdRadarData/models/champion_v3.bundle")
 OUTPUT_LEADS_DIR = Path("C:/AdRadarData/reports/leads_vc")
 REPORT_OUTPUT_PATH = Path("C:/AdRadarData/reports/vc_live_audit_report.json")
 
@@ -376,7 +376,7 @@ async def run_pipeline():
         audited_vc_posts: List[Dict[str, Any]] = []
         packaged_leads: List[Dict[str, Any]] = []
 
-        print(f"\n[*] STEP 1: Running champion_v2.bundle in EXTERNAL_PUBLICATION mode on {len(articles)} posts...", flush=True)
+        print(f"\n[*] STEP 1: Running champion_v3.bundle in EXTERNAL_PUBLICATION mode on {len(articles)} posts...", flush=True)
 
         for idx, art in enumerate(articles, 1):
             title = art["title"]
